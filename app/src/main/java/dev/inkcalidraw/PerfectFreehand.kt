@@ -72,7 +72,7 @@ object PerfectFreehand {
 
     private fun hasPressure(p: DoubleArray) = p.size > 2 && p[2] >= 0.0
 
-    private fun strokeRadius(size: Double, thinning: Double, pressure: Double, easing: (Double) -> Double) =
+    fun strokeRadius(size: Double, thinning: Double, pressure: Double, easing: (Double) -> Double) =
         size * easing(0.5 - thinning * (0.5 - pressure))
 
     fun getStroke(points: List<DoubleArray>, o: Options): List<DoubleArray> =

@@ -50,8 +50,20 @@ object PenProfiles {
         }
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
         bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
-        return BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply {
-            setLocalMatrix(android.graphics.Matrix().apply { val k = if (kind == "chalk") 0.5f else 0.25f; setScale(k, k) })
-        }
+        return BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply { anchorGrain(this, kind, 0f, 0f) }
+    }
+
+    private val grainMatrix = ThreadLocal.withInitial { android.graphics.Matrix() }
+
+    /**
+     * Pins the grain to the paper: texel positions are fixed in scene coordinates, whatever the canvas is translated to.
+     * [originX]/[originY] = scene position of the canvas origin (an element's x/y when drawing it in local coordinates).
+     */
+    fun anchorGrain(shader: Shader, kind: String, originX: Float, originY: Float) {
+        val k = if (kind == "chalk") 0.5f else 0.25f
+        val m = grainMatrix.get()!!
+        m.setScale(k, k)
+        m.postTranslate(-originX, -originY)
+        shader.setLocalMatrix(m)
     }
 }

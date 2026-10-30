@@ -170,7 +170,7 @@ fun showProfilePopup(anchor: View, ui: Ui, profiles: List<PenProfile>, current: 
 
 private class StrokePreview(
     ctx: Context, private val ui: Ui, private val w: Double, color: String, opacity: Int, private val selected: Boolean,
-    grain: String?, private val title: String?, private val constant: Boolean = false,
+    private val grain: String?, private val title: String?, private val constant: Boolean = false,
 ) : View(ctx) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.color = ui.sceneColor(SceneRenderer.parseColor(color, Color.BLACK)); alpha = opacity * 255 / 100
@@ -188,8 +188,11 @@ private class StrokePreview(
         }
         // preview at 100% zoom, but never taller than the row
         val shown = minOf(w * ui.dp(1), height * 0.42 / 4.25 / 1.35)
-        val path = SceneRenderer.outlinePath(PerfectFreehand.getStroke(pts, PerfectFreehand.excalidrawOptions(shown, false, false)))
-        c.drawPath(path, fill)
+        val o = PerfectFreehand.excalidrawOptions(shown, false, false)
+        val sp = PerfectFreehand.getStrokePoints(pts, o)
+        val path = SceneRenderer.outlinePath(PerfectFreehand.getStrokeOutlinePoints(sp, o))
+        if (GrainStroke.isGrainBrush(grain)) GrainStroke.draw(c, path, GrainStroke.bands(sp, o, grain!!), fill) // same as on the page
+        else c.drawPath(path, fill)
         if (title != null) { label.color = ui.text; label.textSize = ui.dp(14); c.drawText(title, ui.dp(12), height / 2f + ui.dp(5), label) }
         else c.drawText(if (w % 1.0 == 0.0) w.toInt().toString() else w.toString(), width - ui.dp(46), height / 2f + ui.dp(4), label)
     }

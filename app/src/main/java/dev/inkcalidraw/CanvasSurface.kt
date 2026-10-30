@@ -191,8 +191,17 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         canvas.concat(w.matrix)
         wetPaint.color = w.color
         wetPaint.alpha = w.alpha
-        wetPaint.shader = w.grain?.let { k -> grains.getOrPut(k) { PenProfiles.grainShader(k) } }
-        canvas.drawPath(path, wetPaint)
+        val grain = w.grain
+        if (GrainStroke.isGrainBrush(grain)) {
+            // exactly what SceneRenderer draws for the committed stroke: grain pinned to the paper, pressure as darkness
+            val sh = grains.getOrPut(grain!!) { PenProfiles.grainShader(grain) }
+            PenProfiles.anchorGrain(sh, grain, 0f, 0f) // the wet stroke is drawn in scene coordinates
+            wetPaint.shader = sh
+            GrainStroke.draw(canvas, path, GrainStroke.bands(strokePoints, opts, grain), wetPaint)
+        } else {
+            wetPaint.shader = null
+            canvas.drawPath(path, wetPaint)
+        }
         canvas.restore()
     }
 

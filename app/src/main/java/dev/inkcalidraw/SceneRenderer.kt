@@ -127,6 +127,12 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
 
     fun freedrawPath(el: Element): Path = pathCache.getOrPut(el) { outlinePath(el.freedrawOutline()) }
 
+    private val bandCache = java.util.WeakHashMap<Element, Array<Path?>>()
+    private fun grainBands(el: Element, brush: String): Array<Path?> = bandCache.getOrPut(el) {
+        val o = PerfectFreehand.excalidrawOptions(el.strokeWidth, el.simulatePressure, last = false)
+        GrainStroke.bands(PerfectFreehand.getStrokePoints(el.freedrawInput(), o), o, brush)
+    }
+
     private fun drawElement(c: Canvas, el: Element, input: Input) {
         val alpha = (el.opacity / 100.0 * 255).toInt().coerceIn(0, 255)
         val col = color(parseColor(el.strokeColor, Color.BLACK))
@@ -135,9 +141,18 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
         when (el.type) {
             "freedraw" -> {
                 fill.color = col; fill.alpha = alpha
-                fill.shader = el.brush?.let { b -> if (b == "pencil" || b == "chalk") grains.getOrPut(b) { PenProfiles.grainShader(b) } else null }
-                c.drawPath(freedrawPath(el), fill)
-                fill.shader = null
+                val brush = el.brush
+                if (GrainStroke.isGrainBrush(brush)) {
+                    // grain pinned to the paper (the canvas is translated to the element here), pressure as darkness
+                    val sh = grains.getOrPut(brush!!) { PenProfiles.grainShader(brush) }
+                    PenProfiles.anchorGrain(sh, brush, el.x.toFloat(), el.y.toFloat())
+                    fill.shader = sh
+                    GrainStroke.draw(c, freedrawPath(el), grainBands(el, brush), fill)
+                    fill.shader = null
+                } else {
+                    fill.shader = null
+                    c.drawPath(freedrawPath(el), fill)
+                }
             }
             "rectangle", "diamond", "ellipse" -> {
                 val r = RectF(0f, 0f, el.width.toFloat(), el.height.toFloat())
