@@ -37,6 +37,7 @@ import java.io.File
 import kotlin.math.PI
 import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Drives the editor on an emulator with synthetic S Pen input (tool type, pressure, side button) and
@@ -746,6 +747,47 @@ class EditorDeviceTest {
             d.close()
         } finally { Ui.setThemeSetting(ctx, "light") }
     }
+
+    /** Tapping a colour while erasing or selecting goes back to the pen or highlighter that was in use. */
+    @Test fun colourTapRestoresLastDrawingTool() {
+        val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "colours"))
+        fun tool(): EditorActivity.Tool { var t: EditorActivity.Tool? = null; s.onActivity { t = field(it, "tool") }; return t!! }
+        fun call(name: String, vararg args: Any) = s.onActivity { a ->
+            EditorActivity::class.java.declaredMethods.first { it.name == name && it.parameterCount == args.size }.apply { isAccessible = true }.invoke(a, *args)
+        }
+        call("selectTool", EditorActivity.Tool.HIGHLIGHTER)
+        call("selectTool", EditorActivity.Tool.ERASER)
+        call("useColor", "#1971c2")
+        assertEquals("eraser -> colour -> highlighter again", EditorActivity.Tool.HIGHLIGHTER, tool())
+        call("selectTool", EditorActivity.Tool.PEN)
+        call("selectTool", EditorActivity.Tool.SELECT)
+        call("useColor", "#e03131")
+        assertEquals("lasso -> colour -> pen again", EditorActivity.Tool.PEN, tool())
+        var color = ""; s.onActivity { a -> color = EditorActivity::class.java.getDeclaredMethod("activePen").apply { isAccessible = true }.invoke(a).let { (it as PenConfig).color } }
+        assertEquals("#e03131", color)
+        s.close()
+    }
+
+    /** Pen jitter is filtered out: a slow, shaky straight line is stored much straighter than it was drawn. */
+    @Test fun shakyLineIsSmoothed() {
+        val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "jitter"))
+        val r = surfaceRect(s)
+        val rnd = java.util.Random(4)
+        val y = r.exactCenterY()
+        val pts = (0 until 120).map { i -> floatArrayOf(r.left + r.width() * 0.4f + i * 2f, y + (rnd.nextFloat() - 0.5f) * 3f, 0.5f) }
+        gesture(pts, stepMs = 8)
+        SystemClock.sleep(500)
+        val el = scene(s).elements.last { it.type == "freedraw" && !it.isDeleted }
+        val ys = el.points.drop(10).dropLast(5).map { it[1] }
+        val mean = ys.average()
+        val drawnDev = sqrt(pts.drop(10).dropLast(5).map { (it[1] - y).toDouble().let { d -> d * d } }.average())
+        val storedDev = sqrt(ys.map { (it - mean) * (it - mean) }.average()) * scaleOf(s)
+        log("jitter: drawn wobble ${"%.2f".format(drawnDev)} px, stored ${"%.2f".format(storedDev)} px (screen px)")
+        assertTrue("jitter is reduced ($drawnDev -> $storedDev)", storedDev < drawnDev * 0.6)
+        s.close()
+    }
+
+    private fun scaleOf(s: ActivityScenario<EditorActivity>): Double { var k = 1f; s.onActivity { k = CanvasSurface.scaleOf(field(it, "view")) }; return k.toDouble() }
 
     /** Overview screenshots of the toolbar and its submenus. */
     @Test fun toolbarAndSubmenus() {

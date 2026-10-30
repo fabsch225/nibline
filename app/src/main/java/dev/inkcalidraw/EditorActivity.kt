@@ -98,6 +98,10 @@ class EditorActivity : ComponentActivity(), Live.Source {
     // finger long-press opens the same menu (also in pen-only mode, where fingers navigate)
     private var holdX = 0f; private var holdY = 0f
     private var pressureLevel = PenPressure.MEDIUM
+    // de-jitter pen samples (screen px) and pressure as they arrive: live and saved strokes get the same points
+    private val jx = OneEuroFilter.forPenPosition(); private val jy = OneEuroFilter.forPenPosition(); private val jp = OneEuroFilter.forPressure()
+    /** Last drawing tool (pen or highlighter): tapping a colour from the eraser/lasso goes back to it. */
+    private var lastInkTool = Tool.PEN
     private val fingerHold = Runnable {
         // not for a palm resting while the pen is near
         if (lastFingerCount == 1 && SystemClock.uptimeMillis() - lastPenNear > 400) { lastFingerCount = 0; showCanvasMenu(holdX, holdY) }
@@ -468,7 +472,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
                 v.requestUnbufferedDispatch(ev)
                 strokeCounter++
                 sampleCount = 0
-                addSample(w[0], w[1], pressureOf(ev, idx, -1))
+                jx.reset(); jy.reset(); jp.reset()
+                penSample(sx, sy, pressureOf(ev, idx, -1), ev.eventTime)
                 predictor.record(ev)
                 renderWet(null)
             }
@@ -480,6 +485,14 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val p = if (h < 0) ev.getPressure(idx) else ev.getHistoricalPressure(idx, h)
         // Constant-width profiles store 0.5 everywhere, which Excalidraw also renders at constant width.
         return if (ev.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER || !activeProfile().pressure) 0.5f else PenPressure.curve(p.coerceIn(0f, 1f), pressureLevel)
+    }
+
+    /** A real pen sample in screen coordinates: de-jittered, converted to the scene, stored. */
+    private fun penSample(sx: Float, sy: Float, p: Float, timeMs: Long) {
+        val fx = jx.filter(sx.toDouble(), timeMs).toFloat(); val fy = jy.filter(sy.toDouble(), timeMs).toFloat()
+        val fp = jp.filter(p.toDouble(), timeMs).toFloat().coerceIn(0f, 1f)
+        val w = toWorld(fx, fy)
+        addSample(w[0], w[1], fp)
     }
 
     private fun addSample(x: Float, y: Float, p: Float) {
@@ -514,8 +527,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun drawMove(ev: MotionEvent, p: Int) {
         when (g) {
             G.INK -> {
-                for (h in 0 until ev.historySize) { val w = toWorld(ev.getHistoricalX(p, h), ev.getHistoricalY(p, h)); addSample(w[0], w[1], pressureOf(ev, p, h)) }
-                val w = toWorld(ev.getX(p), ev.getY(p)); addSample(w[0], w[1], pressureOf(ev, p, -1))
+                for (h in 0 until ev.historySize) penSample(ev.getHistoricalX(p, h), ev.getHistoricalY(p, h), pressureOf(ev, p, h), ev.getHistoricalEventTime(h))
+                penSample(ev.getX(p), ev.getY(p), pressureOf(ev, p, -1), ev.eventTime)
                 predictor.record(ev)
                 val predicted = predictor.predict()
                 try { renderWet(predicted) } finally { predicted?.recycle() }
@@ -548,7 +561,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         if (isPen(ev.getToolType(idx))) lastPenNear = SystemClock.uptimeMillis()
         when (g) {
             G.INK -> if (canceled) { surface.cancelWet(); Live.wetEnd() } else {
-                for (h in 0 until ev.historySize) { val w = toWorld(ev.getHistoricalX(idx, h), ev.getHistoricalY(idx, h)); addSample(w[0], w[1], pressureOf(ev, idx, h)) }
+                for (h in 0 until ev.historySize) penSample(ev.getHistoricalX(idx, h), ev.getHistoricalY(idx, h), pressureOf(ev, idx, h), ev.getHistoricalEventTime(h))
                 commitStroke()
             }
             G.BUTTON -> if (!canceled) { eraseSnapshot = false; val w = toWorld(ev.getX(idx), ev.getY(idx)); eraseSweep(w, w) }
@@ -1214,6 +1227,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             scene = parsed
             meta = NoteMeta.readFrom(scene)
             tool = Tool.entries.firstOrNull { it.key == meta.tool } ?: Tool.PEN
+            if (tool == Tool.HIGHLIGHTER) lastInkTool = Tool.HIGHLIGHTER
             noteUri = uri
             undo.clear(); redo.clear(); setSelection(emptySet())
             updateToolButtons(); updateColorViews()
@@ -1266,6 +1280,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun selectTool(t: Tool) {
         tool = t; lassoArmed = false
+        if (t == Tool.PEN || t == Tool.HIGHLIGHTER) lastInkTool = t
         if (t != Tool.SELECT && selected.isNotEmpty()) setSelection(emptySet())
         updateToolButtons(); updateColorViews(); metaChanged()
     }
@@ -1280,7 +1295,12 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun activePen(): PenConfig = meta.penFor(activeProfile().id)
 
     private fun setPen(update: (PenConfig) -> PenConfig) {
-        if (tool != Tool.PEN && tool != Tool.HIGHLIGHTER) { tool = Tool.PEN; updateToolButtons() }
+        if (tool != Tool.PEN && tool != Tool.HIGHLIGHTER) {
+            // colour tapped while erasing/selecting: back to the pen or highlighter that was in use
+            tool = lastInkTool; lassoArmed = false
+            if (selected.isNotEmpty()) setSelection(emptySet())
+            updateToolButtons()
+        }
         val id = activeProfile().id
         meta = meta.withPen(id, update(meta.penFor(id)))
         updateColorViews(); metaChanged()

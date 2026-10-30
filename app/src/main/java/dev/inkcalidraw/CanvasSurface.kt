@@ -163,7 +163,11 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         val ox = input[0][0]; val oy = input[0][1]
         fun r2(v: Double) = Math.round(v * 100) / 100.0
         val rel = input.map { doubleArrayOf(r2(it[0] - ox), r2(it[1] - oy), r2(it[2].coerceIn(0.0, 1.0))) }
-        val exact = PerfectFreehand.exactPathInput(rel, opts, round = true).map { doubleArrayOf(it[0] + ox, it[1] + oy, it[2]) }
+        // only the real samples go on the exact path: predicted ones keep perfect-freehand's damping, so a wrong
+        // guess about where the pen goes next doesn't make the tip jitter
+        val real = rel.subList(0, w.count.coerceIn(1, rel.size))
+        val exact = (PerfectFreehand.exactPathInput(real, opts, round = true) + rel.subList(real.size, rel.size))
+            .map { doubleArrayOf(it[0] + ox, it[1] + oy, it[2]) }
         val strokePoints = PerfectFreehand.getStrokePoints(exact, opts)
         val outline = PerfectFreehand.getStrokeOutlinePoints(strokePoints, opts)
         val path = SceneRenderer.outlinePath(outline)
