@@ -810,8 +810,8 @@ class EditorDeviceTest {
 
         // 1) shape tool: ellipse and arrow by dragging
         call("selectTool", EditorActivity.Tool.SHAPE)
-        set("shapeKind", ShapeKind.ELLIPSE); drag(at(0.3f, 0.15f), at(0.5f, 0.27f))
-        set("shapeKind", ShapeKind.ARROW); drag(at(0.55f, 0.2f), at(0.75f, 0.21f))
+        set("shapeKind", ShapeKind.ELLIPSE); drag(at(0.39f, 0.15f), at(0.5f, 0.27f))
+        set("shapeKind", ShapeKind.ARROW); drag(at(0.52f, 0.2f), at(0.62f, 0.205f))
         SystemClock.sleep(400)
         shot("30-shape-tool")
         assertEquals("ellipse drawn", 1, count("ellipse"))
@@ -828,11 +828,11 @@ class EditorDeviceTest {
             SystemClock.sleep(400)
         }
         val rnd = java.util.Random(2)
-        val c = listOf(at(0.3f, 0.35f), at(0.6f, 0.35f), at(0.6f, 0.5f), at(0.3f, 0.5f), at(0.305f, 0.355f))
+        val c = listOf(at(0.4f, 0.35f), at(0.6f, 0.35f), at(0.6f, 0.5f), at(0.4f, 0.5f), at(0.403f, 0.355f))
         val rect = (0 until 4).flatMap { e -> (0 until 15).map { k -> val t = k / 15f; floatArrayOf(c[e][0] + (c[e + 1][0] - c[e][0]) * t + rnd.nextFloat() * 4 - 2, c[e][1] + (c[e + 1][1] - c[e][1]) * t + rnd.nextFloat() * 4 - 2, 0.6f) } } + listOf(c[4])
         val fd0 = count("freedraw")
         holdStroke(rect)
-        holdStroke((0..30).map { i -> floatArrayOf(r.left + r.width() * (0.3f + 0.3f * i / 30f), r.top + r.height() * 0.56f + (rnd.nextFloat() - 0.5f) * 3, 0.6f) })
+        holdStroke((0..30).map { i -> floatArrayOf(r.left + r.width() * (0.4f + 0.2f * i / 30f), r.top + r.height() * 0.56f + (rnd.nextFloat() - 0.5f) * 3, 0.6f) })
         shot("31-hold-to-shape")
         assertEquals("held rough rectangle snapped", 1, count("rectangle"))
         assertEquals("held straight stroke became a line", 1, count("line"))
@@ -841,7 +841,7 @@ class EditorDeviceTest {
 
         // 3) area eraser cuts a stroke in two
         val y = r.top + r.height() * 0.65f
-        gesture((0..40).map { i -> floatArrayOf(r.left + r.width() * (0.3f + 0.4f * i / 40f), y, 0.6f) })
+        gesture((0..40).map { i -> floatArrayOf(r.left + r.width() * (0.4f + 0.2f * i / 40f), y, 0.6f) })
         SystemClock.sleep(300)
         val fd1 = count("freedraw")
         call("selectTool", EditorActivity.Tool.ERASER); set("areaEraser", true)
@@ -853,9 +853,9 @@ class EditorDeviceTest {
         // 4) laser: a red trail while pointing, nothing stored, gone after a moment
         call("selectTool", EditorActivity.Tool.LASER)
         val n0 = scene(s).elements.size
-        val lp = (0..60).map { i -> floatArrayOf(r.left + r.width() * (0.3f + 0.4f * i / 60f), r.top + r.height() * 0.8f + 30f * sin(i / 6.0).toFloat(), 0.5f) }
+        val lp = (0..60).map { i -> floatArrayOf(r.left + r.width() * (0.4f + 0.2f * i / 60f), r.top + r.height() * 0.8f + 30f * sin(i / 6.0).toFloat(), 0.5f) }
         val down = gesture(lp, lift = false, stepMs = 5)
-        fun red(b: Bitmap): Int { var n = 0; for (yy in (r.top + r.height() * 0.75f).toInt() until (r.top + r.height() * 0.85f).toInt() step 2) for (x in r.left until r.right step 2) { val p = b.getPixel(x, yy); if (Color.red(p) > 200 && Color.green(p) < 120 && Color.blue(p) < 120) n++ }; return n }
+        fun red(b: Bitmap): Int { var n = 0; for (yy in (r.top + r.height() * 0.75f).toInt() until (r.top + r.height() * 0.85f).toInt() step 2) for (x in (r.left + r.width() * 0.35f).toInt() until (r.left + r.width() * 0.65f).toInt() step 2) { val p = b.getPixel(x, yy); if (Color.red(p) > 200 && Color.green(p) < 120 && Color.blue(p) < 120) n++ }; return n }
         val during = red(auto.takeScreenshot())
         inject(event(MotionEvent.ACTION_UP, down, lp.last()[0], lp.last()[1], 0.5f, MotionEvent.TOOL_TYPE_STYLUS))
         SystemClock.sleep(2000)
@@ -867,9 +867,9 @@ class EditorDeviceTest {
 
         // 5) writing guide: a few "letters" in a row bring up the baseline
         call("selectTool", EditorActivity.Tool.PEN); set("guideOn", true)
-        val by = r.top + r.height() * 0.9f
+        val by = r.top + r.height() * 0.86f
         for (k in 0 until 7) {
-            val x0 = r.left + r.width() * 0.25f + k * 34f
+            val x0 = r.left + r.width() * 0.4f + k * 34f
             gesture((0..14).map { i -> val t = i / 14.0; floatArrayOf(x0 + 12f * sin(t * PI).toFloat(), by - 28f * (1 - t).toFloat(), 0.6f) })
             SystemClock.sleep(80)
         }

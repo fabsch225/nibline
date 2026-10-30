@@ -37,7 +37,7 @@ object PenProfiles {
     private fun densities(kind: String) = if (kind == "chalk") floatArrayOf(0.34f, 0.6f, 0.84f) else floatArrayOf(0.42f, 0.7f, 0.93f)
 
     private val noiseCache = HashMap<String, FloatArray>()
-    const val GRAIN_SIZE = 256
+    const val GRAIN_SIZE = 512 // big enough that the tile doesn't visibly repeat along a stroke
 
     /**
      * Tileable multi-octave value noise, rank-normalised to an even 0..1 spread (so a threshold t keeps exactly a
@@ -62,9 +62,11 @@ object PenProfiles {
                 f[y * n + x] += v * weight
             }
         }
-        val order = f.indices.sortedBy { f[it] }
+        // rank without boxing: (value bits, index) packed in a long; positive floats sort like their bits
+        val keys = LongArray(f.size) { (java.lang.Float.floatToIntBits(f[it]).toLong() shl 32) or it.toLong() }
+        keys.sort()
         val out = FloatArray(f.size)
-        order.forEachIndexed { rank, i -> out[i] = rank / (f.size - 1f) }
+        keys.forEachIndexed { rank, k -> out[(k and 0xffffffffL).toInt()] = rank / (f.size - 1f) }
         out
     }
 
