@@ -542,16 +542,23 @@ class EditorDeviceTest {
         }
     }
 
-    /** Diagnostic for the freeze: which step stops new strokes from reaching the screen? Logs, doesn't fail. */
-    @Test fun freezeDiagnostics() {
+    /**
+     * Regression test for the canvas freeze (render thread starved of buffers by back-to-back frames): after each of
+     * these actions the canvas must keep rendering and a new stroke must reach the screen.
+     */
+    @Test fun canvasKeepsRenderingAfterEachAction() {
+        val failures = ArrayList<String>()
         fun pick(a: EditorActivity, t: EditorActivity.Tool) = EditorActivity::class.java.getDeclaredMethod("selectTool", EditorActivity.Tool::class.java).apply { isAccessible = true }.invoke(a, t)
         val variants = linkedMapOf<String, (ActivityScenario<EditorActivity>, Rect) -> Unit>(
+            "nothing" to { _, _ -> },
             "tap-eraser-button" to { _, _ -> device.findObject(By.desc("Eraser")).click(); SystemClock.sleep(400) },
             "erase-gesture-no-toolbar" to { s, r -> s.onActivity { pick(it, EditorActivity.Tool.ERASER) }; gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 39f), 0.5f) }); SystemClock.sleep(400) },
             "button-erase-gesture" to { _, r -> gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 39f), 0.5f) }, buttons = MotionEvent.BUTTON_STYLUS_PRIMARY); SystemClock.sleep(400) },
             "tap-thickness-then-back" to { _, _ -> device.findObject(By.desc("Thickness")).click(); SystemClock.sleep(500); device.pressBack(); SystemClock.sleep(400) },
             "fit-width" to { _, _ -> device.findObject(By.desc("Fit")).click(); device.wait(Until.findObject(By.text("Fit width")), 3000)!!.click(); SystemClock.sleep(900) },
             "fit-width-no-menu" to { s, _ -> s.onActivity { EditorActivity::class.java.getDeclaredMethod("fitWidth").apply { isAccessible = true }.invoke(it) }; SystemClock.sleep(900) },
+            "long-fast-erase" to { s, r -> s.onActivity { pick(it, EditorActivity.Tool.ERASER) }; gesture((0 until 400).map { i -> floatArrayOf(r.left + r.width() * (0.2f + 0.6f * (i % 50) / 49f), r.top + r.height() * (0.15f + 0.7f * i / 399f), 0.5f) }, stepMs = 2); SystemClock.sleep(400) },
+            "fast-finger-pan" to { _, r -> gesture((0 until 200).map { i -> floatArrayOf(r.exactCenterX() + 300f * kotlin.math.sin(i / 10f), r.exactCenterY() + 200f * kotlin.math.cos(i / 13f), 0.5f) }, tool = MotionEvent.TOOL_TYPE_FINGER, stepMs = 2); SystemClock.sleep(400) },
         )
         for ((name, step) in variants) {
             val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "diag-$name"))
@@ -561,15 +568,16 @@ class EditorDeviceTest {
             SystemClock.sleep(200)
             var f0 = 0; s.onActivity { f0 = field<CanvasSurface>(it, "surface").framesDrawn }
             val y = r.top + r.height() * 0.5f
-            val before = shot("24-diag-$name-before")
+            val before = shot("24-render-$name-before")
             gesture(wave(r, y))
             SystemClock.sleep(1200)
-            val after = shot("24-diag-$name-after")
+            val after = shot("24-render-$name-after")
             var f1 = 0; s.onActivity { f1 = field<CanvasSurface>(it, "surface").framesDrawn }
             var changed = 0
             for (yy in (y - 60).toInt() until (y + 60).toInt() step 2) for (xx in (r.left + r.width() * 0.36f).toInt() until (r.left + r.width() * 0.64f).toInt() step 2)
                 if (abs(Color.red(after.getPixel(xx, yy)) - Color.red(before.getPixel(xx, yy))) > 60) changed++
-            log("diag $name: strokes=${live(s, "freedraw")} frames ${f0}->${f1} changedPixels=$changed")
+            log("render check $name: strokes=${live(s, "freedraw")} frames ${f0}->${f1} changedPixels=$changed")
+            if (f1 <= f0 || changed < 100) failures += "$name (frames $f0->$f1, changed pixels $changed)"
             if (f1 == f0) {
                 // stuck: where are the app's threads? (the test runs in the app's process)
                 for ((t, st) in Thread.getAllStackTraces()) {
@@ -579,6 +587,7 @@ class EditorDeviceTest {
             }
             s.close()
         }
+        assertTrue("canvas stopped updating after: $failures", failures.isEmpty())
     }
 
     /** Overview screenshots of the toolbar and its submenus. */

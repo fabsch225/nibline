@@ -89,6 +89,19 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
                 wetStrokeId = -1; prevTail = null
                 drawFrame(canvas)
             }
+
+            // The frame is on its way to the display: allow the next one once SurfaceFlinger has applied it.
+            override fun onMultiBufferedLayerRenderComplete(
+                frontBufferedLayerSurfaceControl: androidx.graphics.surface.SurfaceControlCompat,
+                multiBufferedLayerSurfaceControl: androidx.graphics.surface.SurfaceControlCompat,
+                transaction: androidx.graphics.surface.SurfaceControlCompat.Transaction,
+            ) {
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    transaction.addTransactionCommittedListener(context.mainExecutor, object : androidx.graphics.surface.SurfaceControlCompat.TransactionCommittedListener {
+                        override fun onTransactionCommitted() = frameApplied()
+                    })
+                } else post { postDelayed(::frameApplied, 8) }
+            }
         })
     }
 
@@ -97,12 +110,36 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
     /** Sets what the committed layer should show; it is drawn on the next vsync. */
     fun show(f: Frame) { frame = f; requestRender() }
 
+    /*
+     * At most one multi-buffered render in flight. renderMultiBufferedLayer() doesn't throttle: every call takes a
+     * buffer from the renderer's small pool, and a buffer only comes back after the display has moved on to a newer
+     * one. Requesting a frame on every vsync (eraser strokes, zoom animations, fast pans on a 120 Hz screen) could
+     * drain the pool, and the render thread then blocked for good in BufferPool.obtainFromPool: the canvas froze
+     * while input kept working. Now the next frame is only rendered once the previous one has been applied; requests
+     * in between collapse into one.
+     */
+    private var renderInFlight = false   // main thread
+    private var renderPending = false    // main thread
+    private val frameAppliedRunnable = Runnable { frameApplied() }
+
+    private fun frameApplied() {
+        if (!renderInFlight) return
+        renderInFlight = false
+        removeCallbacks(frameAppliedRunnable)
+        if (renderPending) { renderPending = false; requestRender() }
+    }
+
     fun requestRender() {
         if (frameRequested) return
         frameRequested = true
         Choreographer.getInstance().postFrameCallback {
             frameRequested = false
-            renderer?.renderMultiBufferedLayer(emptyList())
+            if (renderInFlight) { renderPending = true; return@postFrameCallback }
+            val r = renderer ?: return@postFrameCallback
+            renderInFlight = true
+            // safety net in case a commit callback never arrives (surface destroyed mid-frame, ...)
+            removeCallbacks(frameAppliedRunnable); postDelayed(frameAppliedRunnable, 250)
+            r.renderMultiBufferedLayer(emptyList())
         }
     }
 
