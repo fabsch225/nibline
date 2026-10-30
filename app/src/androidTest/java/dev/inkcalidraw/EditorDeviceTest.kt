@@ -488,6 +488,58 @@ class EditorDeviceTest {
         s.close()
     }
 
+    /**
+     * Bug report: after erasing or "Fit width" new strokes didn't show on screen (they were saved and reached Live
+     * viewers). Draws, erases (eraser tool and S Pen button), fits the width, and checks each new stroke is visible.
+     * Runs with Live off and, when a relay is given, with Live on.
+     */
+    @Test fun strokesStayVisibleAfterEraseAndFitWidth() {
+        val relay = InstrumentationRegistry.getArguments().getString("liveRelay")
+        for (live in listOfNotNull(false, if (relay != null) true else null)) {
+            inst.runOnMainSync { Live.stop(ctx); if (live) { Live.setRelayUrl(ctx, relay!!); Live.newCode(ctx) } }
+            val viewer = if (live) okhttp3.OkHttpClient().newWebSocket(okhttp3.Request.Builder().url(relay!!.replaceFirst("http", "ws") + "/live/" + Live.code(ctx)).build(), object : okhttp3.WebSocketListener() {}) else null
+            val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "visible-$live"))
+            if (live) { s.onActivity { a -> Live.start(a); Live.attach(a, a) }; val t0 = SystemClock.uptimeMillis(); while (Live.state != Live.State.LIVE && SystemClock.uptimeMillis() - t0 < 10_000) SystemClock.sleep(50) }
+            val tag = if (live) "live" else "plain"
+            fun inkAround(r: Rect, y: Float): Int {
+                val b = shot("23-$tag-check"); var n = 0
+                for (yy in (y - 60).toInt() until (y + 60).toInt() step 2) for (xx in (r.left + r.width() * 0.36f).toInt() until (r.left + r.width() * 0.64f).toInt() step 2) if (Color.red(b.getPixel(xx, yy)) < 120) n++
+                return n
+            }
+            fun drawAndCheck(step: String) {
+                val r = surfaceRect(s)
+                val y = r.top + r.height() * (0.25f + 0.5f * Math.random().toFloat())
+                val before = inkAround(r, y)
+                device.findObject(By.desc("Pen")).click(); SystemClock.sleep(300)
+                gesture(wave(r, y))
+                var after = 0
+                for (i in 0 until 8) { SystemClock.sleep(250); after = inkAround(r, y); if (after - before > 150) break }
+                log("visible [$tag] $step: ink before=$before after=$after")
+                shot("23-$tag-$step")
+                assertTrue("[$tag] stroke visible after $step (ink $before -> $after)", after - before > 150)
+            }
+            drawAndCheck("first-stroke")
+            // erase with the eraser tool across the middle
+            val r = surfaceRect(s)
+            device.findObject(By.desc("Eraser")).click(); SystemClock.sleep(300)
+            gesture((0 until 60).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 59f), 0.5f) })
+            SystemClock.sleep(400)
+            drawAndCheck("after-eraser-tool")
+            // erase with the S Pen button
+            gesture((0 until 60).map { i -> floatArrayOf(r.left + r.width() * 0.5f, r.top + r.height() * (0.2f + 0.6f * i / 59f), 0.5f) }, buttons = MotionEvent.BUTTON_STYLUS_PRIMARY)
+            SystemClock.sleep(400)
+            drawAndCheck("after-button-erase")
+            // fit width
+            device.findObject(By.desc("Fit")).click()
+            device.wait(Until.findObject(By.text("Fit width")), 3000)!!.click()
+            SystemClock.sleep(900)
+            drawAndCheck("after-fit-width")
+            inst.runOnMainSync { Live.stop(ctx) }
+            viewer?.close(1000, null)
+            s.close()
+        }
+    }
+
     /** Overview screenshots of the toolbar and its submenus. */
     @Test fun toolbarAndSubmenus() {
         val s = launch(note(Pages.newPagedScene(PageOrientation.LANDSCAPE, PageDirection.HORIZONTAL).toJson(), "toolbar"))
