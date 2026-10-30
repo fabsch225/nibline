@@ -17,6 +17,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.View
 import androidx.core.content.FileProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -426,6 +427,51 @@ class EditorDeviceTest {
         assertEquals(null, device.findObject(By.textContains("Allow access")))
         shot("21-link-second-open")
         device.pressBack()
+    }
+
+    /**
+     * Live mirror: with Live on, a viewer connected to the relay (run on the CI machine, reached at 10.0.2.2) receives
+     * the note, the in-progress stroke, the finished stroke, erasing and the visible area. The received messages are saved
+     * so CI can replay them into the real viewer page.
+     */
+    @Test fun liveMirrorsTheOpenNote() {
+        val relay = InstrumentationRegistry.getArguments().getString("liveRelay")
+        org.junit.Assume.assumeTrue("no relay given (-e liveRelay URL)", relay != null)
+        inst.runOnMainSync { Live.stop(ctx); Live.setRelayUrl(ctx, relay!!); Live.newCode(ctx) }
+        val code = Live.code(ctx)
+        val msgs = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val viewer = okhttp3.OkHttpClient().newWebSocket(okhttp3.Request.Builder().url(relay!!.replaceFirst("http", "ws") + "/live/$code").build(),
+            object : okhttp3.WebSocketListener() { override fun onMessage(webSocket: okhttp3.WebSocket, text: String) { msgs += text } })
+        fun waitFor(what: String, ms: Long = 10_000, ok: () -> Boolean) {
+            val t0 = SystemClock.uptimeMillis()
+            while (!ok()) { if (SystemClock.uptimeMillis() - t0 > ms) throw AssertionError("timed out: $what (got ${msgs.map { it.take(60) }})"); SystemClock.sleep(50) }
+        }
+        val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "Live lecture"))
+        s.onActivity { a -> Live.start(a); Live.attach(a, a) }
+        waitFor("tablet connected") { Live.state == Live.State.LIVE }
+        waitFor("note arrives") { msgs.any { it.contains("\"t\":\"full\"") && it.contains("Live lecture") } }
+        waitFor("tablet sees the viewer") { Live.viewers == 1 }
+        val r = surfaceRect(s)
+        // draw slowly so in-progress updates go out
+        gesture(wave(r, r.exactCenterY()), stepMs = 14)
+        waitFor("finished stroke") { msgs.any { it.startsWith("{\"t\":\"delta\"") && it.contains("\"type\":\"freedraw\"") } }
+        val wet = msgs.count { it.startsWith("{\"t\":\"wet\"") && !it.contains("\"el\":null") }
+        assertTrue("in-progress stroke updates sent: $wet", wet >= 3)
+        waitFor("wet stroke ended") { msgs.any { it == "{\"t\":\"wet\",\"el\":null}" } }
+        waitFor("visible area") { msgs.any { it.startsWith("{\"t\":\"view\"") } }
+        shot("22-live-drawing")
+        // a second stroke, then erase the first
+        gesture(wave(r, r.exactCenterY() + 160))
+        waitFor("second stroke") { msgs.filter { it.startsWith("{\"t\":\"delta\"") && it.contains("freedraw") }.size >= 2 }
+        device.findObject(By.desc("Eraser")).click(); SystemClock.sleep(300)
+        gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * (0.36f + 0.28f * i / 39f), r.exactCenterY(), 0.5f) })
+        waitFor("erase reaches the viewer") { msgs.any { it.startsWith("{\"t\":\"delta\"") && !it.contains("\"remove\":[]") } }
+        device.findObject(By.desc("Pen")).click()
+        log("live: ${msgs.size} messages to the viewer (${wet} in-progress updates), code $code")
+        File(shots, "live-messages.jsonl").writeText(msgs.joinToString("\n"))
+        inst.runOnMainSync { Live.stop(ctx) }
+        viewer.close(1000, null)
+        s.close()
     }
 
     /** Overview screenshots of the toolbar and its submenus. */

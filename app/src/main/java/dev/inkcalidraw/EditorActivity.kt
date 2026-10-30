@@ -34,7 +34,7 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.hypot
 
-class EditorActivity : ComponentActivity() {
+class EditorActivity : ComponentActivity(), Live.Source {
 
     enum class Tool(val key: String) { PEN("pen"), HIGHLIGHTER("highlighter"), ERASER("eraser"), SELECT("select") }
 
@@ -172,7 +172,92 @@ class EditorActivity : ComponentActivity() {
         saveNow()
     }
 
-    override fun onDestroy() { surface.release(); pdfs.close(); super.onDestroy() }
+    override fun onDestroy() { Live.detach(this); Live.unlisten(liveListener); surface.release(); pdfs.close(); super.onDestroy() }
+
+    // =============================================================== live mirror
+
+    override fun liveTitle(): String = titleView.text.toString()
+    override fun liveScene(): ExcalidrawScene = scene
+    override fun livePdfPage(file: String, page: Int, w: Int, h: Int): android.graphics.Bitmap? = pdfs.renderNow(file, page, w, h)
+
+    private var liveButton: ImageView? = null
+    private val liveListener: () -> Unit = { updateLiveButton() }
+
+    private fun updateLiveButton() {
+        val b = liveButton ?: return
+        val on = Live.state == Live.State.LIVE
+        val color = when (Live.state) { Live.State.LIVE -> Color.parseColor("#2f9e44"); Live.State.CONNECTING -> Color.parseColor("#f08c00"); Live.State.FAILED -> Color.parseColor("#e03131"); else -> ui.text }
+        b.setImageDrawable(IconDrawable(Icon.LIVE, color))
+        b.contentDescription = if (on) "Live (${Live.viewers} watching)" else "Live"
+    }
+
+    /** The stroke being drawn, as an Excalidraw element (for viewers). */
+    private fun wetElement(): kotlinx.serialization.json.JsonObject {
+        val pen = activePen()
+        val n = sampleCount
+        val pts = (0 until n).map { floatArrayOf(samples[it * 3], samples[it * 3 + 1], samples[it * 3 + 2]) }
+        val frameId = if (meta.paged && n > 0) Pages.pageAt(Pages.pages(scene), pts[0][0].toDouble(), pts[0][1].toDouble())?.id else null
+        val brush = activeProfile().id.takeIf { it != "pen" }
+        val pts2 = if (pts.size == 1) listOf(pts[0], pts[0]) else pts
+        return ExcalidrawScene.newFreedraw(pts2, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush).json
+    }
+
+    private fun showLivePanel() {
+        val pad = ui.dpi(20)
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, ui.dpi(8), pad, 0) }
+        val codeView = TextView(this).apply {
+            textSize = 40f; typeface = android.graphics.Typeface.MONOSPACE; letterSpacing = 0.25f; gravity = Gravity.CENTER; setTextColor(ui.text)
+            setTextIsSelectable(true)
+        }
+        val status = TextView(this).apply { textSize = 15f; gravity = Gravity.CENTER; setPadding(0, ui.dpi(4), 0, ui.dpi(10)) }
+        val link = TextView(this).apply { textSize = 14f; gravity = Gravity.CENTER; setTextColor(Color.parseColor("#6965db")); setTextIsSelectable(true) }
+        val help = TextView(this).apply {
+            textSize = 13f; gravity = Gravity.CENTER; setPadding(0, ui.dpi(12), 0, 0); alpha = 0.7f; setTextColor(ui.text)
+            text = "Anyone with this code can watch the note you have open (read-only). Nothing is stored online."
+        }
+        box.addView(codeView); box.addView(status); box.addView(link); box.addView(help)
+        val dialog = android.app.AlertDialog.Builder(this).setTitle("Live").setView(box)
+            .setPositiveButton(" ", null).setNeutralButton("New code", null).setNegativeButton("Share link", null).create()
+        fun refresh() {
+            codeView.text = Live.code(this)
+            link.text = Live.viewerLink(this)
+            status.text = when (Live.state) {
+                Live.State.OFF -> "Not sharing"
+                Live.State.CONNECTING -> "Connecting…"
+                Live.State.LIVE -> if (Live.viewers == 1) "Live · 1 watching" else "Live · ${Live.viewers} watching"
+                Live.State.FAILED -> Live.problem ?: "Couldn't connect"
+            }
+            status.setTextColor(when (Live.state) { Live.State.LIVE -> Color.parseColor("#2f9e44"); Live.State.FAILED -> Color.parseColor("#e03131"); else -> ui.text })
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.text = if (Live.wanted(this)) "Stop" else "Start"
+        }
+        val l: () -> Unit = { refresh() }
+        dialog.setOnShowListener {
+            refresh()
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (Live.wanted(this)) Live.stop(this)
+                else if (!Live.configured(this)) askRelayUrl { Live.start(this); Live.attach(this, this) }
+                else { Live.start(this); Live.attach(this, this) }
+                refresh()
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { Live.newCode(this); refresh() }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, Live.viewerLink(this)), "Share live link"))
+            }
+        }
+        link.setOnLongClickListener { askRelayUrl { if (Live.wanted(this)) { Live.stop(this); Live.start(this); Live.attach(this, this) } ; refresh() }; true }
+        Live.listen(l)
+        dialog.setOnDismissListener { Live.unlisten(l) }
+        dialog.show()
+    }
+
+    /** The relay address is built in; this lets you point the app at another one (long-press the link). */
+    private fun askRelayUrl(then: () -> Unit) {
+        val input = android.widget.EditText(this).apply { setText(Live.relayUrl(this@EditorActivity)); hint = "https://inkcalidraw-live.<you>.workers.dev" }
+        android.app.AlertDialog.Builder(this).setTitle("Live relay address").setView(input)
+            .setPositiveButton("Save") { _, _ -> Live.setRelayUrl(this, input.text.toString()); then() }
+            .setNegativeButton("Cancel", null).show()
+    }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -229,6 +314,10 @@ class EditorActivity : ComponentActivity() {
         if (!::surface.isInitialized) return
         surface.show(buildFrame())
         updatePageNav()
+        if (surface.width > 0) {
+            val a = toWorld(0f, 0f); val b = toWorld(surface.width.toFloat(), surface.height.toFloat())
+            Live.viewChanged(a[0], a[1], b[0] - a[0], b[1] - a[1])
+        }
     }
 
     // =============================================================== input: dispatch
@@ -293,7 +382,7 @@ class EditorActivity : ComponentActivity() {
         (0 until ev.pointerCount).count { it != exclude && ev.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
 
     private fun abortDrawing(ev: MotionEvent) {
-        if (g == G.INK) surface.cancelWet()
+        if (g == G.INK) { surface.cancelWet(); Live.wetEnd() }
         main.removeCallbacks(holdForMenu)
         g = G.NONE; drawPointer = -1; eraserCursor = null; lasso.clear(); dragDx = 0f; dragDy = 0f
         redraw()
@@ -387,6 +476,7 @@ class EditorActivity : ComponentActivity() {
             ui.sceneColor(SceneRenderer.parseColor(pen.color, Color.BLACK)), pen.strokeWidth, pen.opacity * 255 / 100, Matrix(view),
             activeProfile().grain,
         ))
+        Live.wet { wetElement() }
     }
 
     private fun drawMove(ev: MotionEvent, p: Int) {
@@ -425,7 +515,7 @@ class EditorActivity : ComponentActivity() {
         main.removeCallbacks(holdForMenu)
         if (isPen(ev.getToolType(idx))) lastPenNear = SystemClock.uptimeMillis()
         when (g) {
-            G.INK -> if (canceled) surface.cancelWet() else {
+            G.INK -> if (canceled) { surface.cancelWet(); Live.wetEnd() } else {
                 for (h in 0 until ev.historySize) { val w = toWorld(ev.getHistoricalX(idx, h), ev.getHistoricalY(idx, h)); addSample(w[0], w[1], pressureOf(ev, idx, h)) }
                 commitStroke()
             }
@@ -440,7 +530,7 @@ class EditorActivity : ComponentActivity() {
     }
 
     private fun commitStroke() {
-        if (sampleCount == 0) { surface.cancelWet(); return }
+        if (sampleCount == 0) { surface.cancelWet(); Live.wetEnd(); return }
         val pen = activePen()
         val pts = (0 until sampleCount).map { floatArrayOf(samples[it * 3], samples[it * 3 + 1], samples[it * 3 + 2]) }
         val frameId = if (meta.paged) Pages.pageAt(Pages.pages(scene), pts[0][0].toDouble(), pts[0][1].toDouble())?.id else null
@@ -448,6 +538,7 @@ class EditorActivity : ComponentActivity() {
         val brush = activeProfile().id.takeIf { it != "pen" }
         scene.elements.add(ExcalidrawScene.newFreedraw(pts, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush))
         markDirty()
+        Live.wetEnd()
         surface.commitWet(buildFrame()) // scene with the new stroke replaces the wet ink atomically
     }
 
@@ -508,6 +599,7 @@ class EditorActivity : ComponentActivity() {
         }
         val gone = erased ?: return
         if (selected.isNotEmpty()) selected = selected - gone
+        Live.sceneChanged()
         dirty = true; main.removeCallbacks(autosave); main.postDelayed(autosave, 1500)
         if (redrawNow) redraw()
     }
@@ -967,6 +1059,7 @@ class EditorActivity : ComponentActivity() {
 
     /** Scene changed: schedule autosave and redraw. */
     private fun markDirty() {
+        Live.sceneChanged()
         dirty = true
         main.removeCallbacks(autosave)
         main.postDelayed(autosave, 1500)
@@ -997,6 +1090,7 @@ class EditorActivity : ComponentActivity() {
             undo.clear(); redo.clear(); setSelection(emptySet())
             updateToolButtons(); updateColorViews()
             surface.post { if (meta.paged) goToPage(0, keepScale = false) else fitContentNow() }
+            Live.attach(this, this)
         } catch (e: Exception) {
             toast("Couldn't open: ${e.message}")
             finish()
@@ -1007,6 +1101,7 @@ class EditorActivity : ComponentActivity() {
 
     private fun saveNow() {
         if (!dirty) return
+        Live.sceneChanged() // catches any change that didn't go through markDirty
         val uri = noteUri ?: return
         meta.copy(tool = tool.key).writeTo(scene)
         val copy = scene.copyForSave() // JSON encoding happens off the UI thread
@@ -1118,6 +1213,8 @@ class EditorActivity : ComponentActivity() {
         bar.addView(iconButton(Icon.FIT, "Fit") { showFitMenu(it) })
         bar.addView(iconButton(Icon.PDF, "Insert PDF") { pickPdf.launch(arrayOf("application/pdf")) })
         bar.addView(iconButton(Icon.EXPORT, "Export as PDF") { exportPdf.launch(titleView.text.toString() + ".pdf") })
+        liveButton = iconButton(Icon.LIVE, "Live") { showLivePanel() }.also { bar.addView(it) }
+        Live.listen(liveListener); updateLiveButton()
         bar.addView(iconButton(Icon.FULLSCREEN, "Fullscreen") { setFullscreen(true) })
         bar.addView(iconButton(Icon.MORE, "More") { showMoreMenu(it) })
         return bar
@@ -1166,7 +1263,7 @@ class EditorActivity : ComponentActivity() {
                 val newName = input.text.toString()
                 io.execute {
                     val nu = runCatching { store.rename(uri, folder, newName) }.getOrNull()
-                    runOnUiThread { if (nu != null) { noteUri = nu; titleView.text = newName.trim() } else toast("Rename failed") }
+                    runOnUiThread { if (nu != null) { noteUri = nu; titleView.text = newName.trim(); Live.titleChanged() } else toast("Rename failed") }
                 }
             }.setNegativeButton("Cancel", null).show()
     }

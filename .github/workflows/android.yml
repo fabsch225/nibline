@@ -38,7 +38,12 @@ jobs:
           npm run check
 
       - name: Build APK
-        run: ./gradlew --no-daemon assembleRelease
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          export LIVE_RELAY=$(.github/scripts/relay-url.sh || true)
+          echo "Live relay built into the APK: ${LIVE_RELAY:-none}"
+          ./gradlew --no-daemon assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
@@ -103,6 +108,17 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Start a local live relay for the emulator (reached at 10.0.2.2)
+        working-directory: live/relay
+        run: |
+          npm ci --no-audit --no-fund
+          nohup npx wrangler dev --local --ip 0.0.0.0 --port 8787 > ../../relay.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/ && break; sleep 2; done
+
       - name: Build test APKs
         run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
 
@@ -125,7 +141,7 @@ jobs:
             sleep 20
             adb install -r -g app/build/outputs/apk/debug/app-debug.apk
             adb install -r -g app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w -r dev.inkcalidraw.test/androidx.test.runner.AndroidJUnitRunner > instrument.txt || true
+            adb shell am instrument -w -r -e liveRelay http://10.0.2.2:8787 dev.inkcalidraw.test/androidx.test.runner.AndroidJUnitRunner > instrument.txt || true
             mkdir -p device-screens && adb pull /sdcard/Android/data/dev.inkcalidraw/files/screens device-screens/ || true
             cp instrument.txt device-screens/ || true
             adb logcat -d -v time > device-screens/logcat.txt || true
@@ -134,10 +150,22 @@ jobs:
             grep -E "^(OK|FAILURES|Tests run)" instrument.txt || true
             grep -q "^OK (" instrument.txt
 
+      - name: Replay what the tablet sent into the web viewer
+        if: always() && hashFiles('device-screens/screens/live-messages.jsonl') != ''
+        working-directory: live/viewer
+        run: |
+          npm ci --no-audit --no-fund
+          VITE_RELAY_URL=http://127.0.0.1:8797 npm run build
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+          PLAYWRIGHT_PATH=playwright node test/replay.mjs ../../device-screens/screens/live-messages.jsonl ../../device-screens/screens
+
       - name: Upload screenshots and test report
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: device-test-screens-${{ github.run_number }}
-          path: device-screens/
+          path: |
+            device-screens/
+            relay.log
           if-no-files-found: ignore
