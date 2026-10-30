@@ -1,0 +1,17 @@
+{
+  "name": "inkcalidraw-live-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/relay-test.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261026.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.152.0",
+    "ws": "^8.18.0"
+  }
+}

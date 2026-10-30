@@ -1,0 +1,14 @@
+name = "inkcalidraw-live"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# One Durable Object per live code: holds the mirrored note and fans changes out to viewers.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "LiveRoom"
+
+# The free plan only offers SQLite-backed Durable Objects; the relay keeps everything in memory and stores nothing.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LiveRoom"]
