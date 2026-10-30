@@ -72,7 +72,7 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         holder.setFormat(PixelFormat.TRANSLUCENT)
         sceneRenderer.onImageReady = { post { requestRender() } }
         holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(h: SurfaceHolder) {}
+            override fun surfaceCreated(h: SurfaceHolder) { applyFrameRate() }
             override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, hh: Int) {
                 // The renderer configures its layers in its own surfaceChanged; render once that's done,
                 // and once more a bit later in case the first request raced with that setup.
@@ -106,6 +106,16 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
     }
 
     fun release() { renderer?.release(true); renderer = null }
+
+    /** Frame rate this surface wants (the display's fastest mode); set by the activity. */
+    var preferredFrameRate = 0f
+        set(v) { field = v; applyFrameRate() }
+
+    private fun applyFrameRate() {
+        if (android.os.Build.VERSION.SDK_INT < 30 || preferredFrameRate <= 0f) return
+        val s = holder.surface
+        if (s.isValid) runCatching { s.setFrameRate(preferredFrameRate, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT) }
+    }
 
     /** Sets what the committed layer should show; it is drawn on the next vsync. */
     fun show(f: Frame) { frame = f; requestRender() }

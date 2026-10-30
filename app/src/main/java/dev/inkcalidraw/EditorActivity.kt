@@ -187,6 +187,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             v.setPadding(b.left, b.top, b.right, b.bottom); insets
         }
         setContentView(root)
+        useHighestRefreshRate()
         window.statusBarColor = ui.bar
         window.navigationBarColor = ui.bar
         setFullscreen(getSharedPreferences("ui", 0).getBoolean("fullscreen", false))
@@ -201,6 +202,19 @@ class EditorActivity : ComponentActivity(), Live.Source {
     }
 
     override fun onResume() { super.onResume(); redraw() }
+
+    /**
+     * Ask for the display's fastest mode (120 Hz on a Tab S9). Android otherwise often runs apps at 60 Hz, which makes
+     * ink, panning and gliding visibly less fluid. Pen samples themselves are already all used (incl. historical ones).
+     */
+    private fun useHighestRefreshRate() {
+        val d = if (android.os.Build.VERSION.SDK_INT >= 30) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
+        d ?: return
+        val cur = d.mode
+        val best = d.supportedModes.filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }.maxByOrNull { it.refreshRate } ?: return
+        window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
+        surface.preferredFrameRate = best.refreshRate
+    }
 
     override fun onPause() {
         super.onPause()

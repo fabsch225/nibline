@@ -796,6 +796,19 @@ class EditorDeviceTest {
 
     private fun scaleOf(s: ActivityScenario<EditorActivity>): Double { var k = 1f; s.onActivity { k = CanvasSurface.scaleOf(field(it, "view")) }; return k.toDouble() }
 
+    /** The editor asks for the display's fastest mode (120 Hz on a Tab S9; the emulator only has 60 Hz). */
+    @Test fun editorRequestsHighestRefreshRate() {
+        val s = launch(note(ExcalidrawScene.empty().toJson(), "refresh"))
+        s.onActivity { a ->
+            val d = a.display!!
+            val best = d.supportedModes.filter { it.physicalWidth == d.mode.physicalWidth && it.physicalHeight == d.mode.physicalHeight }.maxBy { it.refreshRate }
+            log("refresh: modes ${d.supportedModes.joinToString { "%.0f".format(it.refreshRate) }} Hz, requested mode ${a.window.attributes.preferredDisplayModeId} (best ${best.modeId}, ${"%.0f".format(best.refreshRate)} Hz)")
+            assertEquals(best.modeId, a.window.attributes.preferredDisplayModeId)
+            assertEquals(best.refreshRate, field<CanvasSurface>(a, "surface").preferredFrameRate, 0.01f)
+        }
+        s.close()
+    }
+
     /** Overview screenshots of the toolbar and its submenus. */
     @Test fun toolbarAndSubmenus() {
         val s = launch(note(Pages.newPagedScene(PageOrientation.LANDSCAPE, PageDirection.HORIZONTAL).toJson(), "toolbar"))
