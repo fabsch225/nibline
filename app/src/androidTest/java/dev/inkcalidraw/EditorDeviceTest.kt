@@ -542,6 +542,39 @@ class EditorDeviceTest {
         }
     }
 
+    /** Diagnostic for the freeze: which step stops new strokes from reaching the screen? Logs, doesn't fail. */
+    @Test fun freezeDiagnostics() {
+        fun pick(a: EditorActivity, t: EditorActivity.Tool) = EditorActivity::class.java.getDeclaredMethod("selectTool", EditorActivity.Tool::class.java).apply { isAccessible = true }.invoke(a, t)
+        val variants = linkedMapOf<String, (ActivityScenario<EditorActivity>, Rect) -> Unit>(
+            "nothing" to { _, _ -> },
+            "tap-eraser-button" to { _, _ -> device.findObject(By.desc("Eraser")).click(); SystemClock.sleep(400) },
+            "erase-gesture-no-toolbar" to { s, r -> s.onActivity { pick(it, EditorActivity.Tool.ERASER) }; gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 39f), 0.5f) }); SystemClock.sleep(400) },
+            "button-erase-gesture" to { _, r -> gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 39f), 0.5f) }, buttons = MotionEvent.BUTTON_STYLUS_PRIMARY); SystemClock.sleep(400) },
+            "tap-thickness-then-back" to { _, _ -> device.findObject(By.desc("Thickness")).click(); SystemClock.sleep(500); device.pressBack(); SystemClock.sleep(400) },
+            "fit-width" to { _, _ -> device.findObject(By.desc("Fit")).click(); device.wait(Until.findObject(By.text("Fit width")), 3000)!!.click(); SystemClock.sleep(900) },
+            "fit-width-no-menu" to { s, _ -> s.onActivity { EditorActivity::class.java.getDeclaredMethod("fitWidth").apply { isAccessible = true }.invoke(it) }; SystemClock.sleep(900) },
+        )
+        for ((name, step) in variants) {
+            val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "diag-$name"))
+            val r = surfaceRect(s)
+            step(s, r)
+            s.onActivity { pick(it, EditorActivity.Tool.PEN) }
+            SystemClock.sleep(200)
+            var f0 = 0; s.onActivity { f0 = field<CanvasSurface>(it, "surface").framesDrawn }
+            val y = r.top + r.height() * 0.5f
+            val before = shot("24-diag-$name-before")
+            gesture(wave(r, y))
+            SystemClock.sleep(1200)
+            val after = shot("24-diag-$name-after")
+            var f1 = 0; s.onActivity { f1 = field<CanvasSurface>(it, "surface").framesDrawn }
+            var changed = 0
+            for (yy in (y - 60).toInt() until (y + 60).toInt() step 2) for (xx in (r.left + r.width() * 0.36f).toInt() until (r.left + r.width() * 0.64f).toInt() step 2)
+                if (abs(Color.red(after.getPixel(xx, yy)) - Color.red(before.getPixel(xx, yy))) > 60) changed++
+            log("diag $name: strokes=${live(s, "freedraw")} frames ${f0}->${f1} changedPixels=$changed")
+            s.close()
+        }
+    }
+
     /** Overview screenshots of the toolbar and its submenus. */
     @Test fun toolbarAndSubmenus() {
         val s = launch(note(Pages.newPagedScene(PageOrientation.LANDSCAPE, PageDirection.HORIZONTAL).toJson(), "toolbar"))
