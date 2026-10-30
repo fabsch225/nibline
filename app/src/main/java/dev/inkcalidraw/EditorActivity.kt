@@ -203,17 +203,39 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     override fun onResume() { super.onResume(); redraw() }
 
-    /**
-     * Ask for the display's fastest mode (120 Hz on a Tab S9). Android otherwise often runs apps at 60 Hz, which makes
-     * ink, panning and gliding visibly less fluid. Pen samples themselves are already all used (incl. historical ones).
+    /*
+     * Refresh rate: Android picks it from explicit requests, from how often surfaces post new frames, and from boosts
+     * for standard scrolling views. The canvas gets none of those on its own (front-buffered ink posts no new frames),
+     * so it stayed at 60 Hz. While something happens (pen hovering or down, fingers, panning, gliding, animations) the
+     * editor asks for the display's fastest mode (120 Hz on a Tab S9); 1.5 s after everything is still it withdraws the
+     * request and the display can drop back to save battery.
      */
+    private var fastModeId = 0
+    private var fastRate = 0f
+    @Volatile var fastRefresh = false; private set // for tests
+    private val slowDown = Runnable { setFastRefresh(false) }
+
     private fun useHighestRefreshRate() {
         val d = if (android.os.Build.VERSION.SDK_INT >= 30) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
         d ?: return
         val cur = d.mode
         val best = d.supportedModes.filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }.maxByOrNull { it.refreshRate } ?: return
-        window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
-        surface.preferredFrameRate = best.refreshRate
+        fastModeId = best.modeId; fastRate = best.refreshRate
+    }
+
+    /** Something is moving: run at the fastest refresh rate until 1.5 s after the last call. */
+    private fun keepFast() {
+        if (fastModeId == 0) return
+        setFastRefresh(true)
+        main.removeCallbacks(slowDown)
+        main.postDelayed(slowDown, 1500)
+    }
+
+    private fun setFastRefresh(on: Boolean) {
+        if (fastRefresh == on) return
+        fastRefresh = on
+        window.attributes = window.attributes.apply { preferredDisplayModeId = if (on) fastModeId else 0 }
+        surface.preferredFrameRate = if (on) fastRate else 0f
     }
 
     override fun onPause() {
@@ -222,7 +244,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         saveNow()
     }
 
-    override fun onDestroy() { stopFling(); velocity?.recycle(); velocity = null; Live.detach(this); Live.unlisten(liveListener); surface.release(); pdfs.close(); super.onDestroy() }
+    override fun onDestroy() { main.removeCallbacks(slowDown); stopFling(); velocity?.recycle(); velocity = null; Live.detach(this); Live.unlisten(liveListener); surface.release(); pdfs.close(); super.onDestroy() }
 
     // =============================================================== live mirror
 
@@ -362,6 +384,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun redraw() {
         if (!::surface.isInitialized) return
+        keepFast() // panning, gliding, zoom animations, erasing
         surface.show(buildFrame())
         updatePageNav()
         if (surface.width > 0) {
@@ -381,6 +404,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     @Volatile var touchEvents = 0
 
     private fun onTouch(v: View, ev: MotionEvent) {
+        keepFast()
         val t0 = System.nanoTime(); val c0 = android.os.Debug.threadCpuTimeNanos()
         try { handleTouch(v, ev) } finally {
             touchNanos += System.nanoTime() - t0; touchCpuNanos += android.os.Debug.threadCpuTimeNanos() - c0; touchEvents++
@@ -442,6 +466,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun onHover(ev: MotionEvent) {
         if (!isPen(ev.getToolType(0))) return
+        keepFast() // the pen is about to write: switch before it touches
         lastPenNear = SystemClock.uptimeMillis()
         val erasing = tool == Tool.ERASER || ev.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER ||
             (ev.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0

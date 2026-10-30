@@ -796,16 +796,29 @@ class EditorDeviceTest {
 
     private fun scaleOf(s: ActivityScenario<EditorActivity>): Double { var k = 1f; s.onActivity { k = CanvasSurface.scaleOf(field(it, "view")) }; return k.toDouble() }
 
-    /** The editor asks for the display's fastest mode (120 Hz on a Tab S9; the emulator only has 60 Hz). */
-    @Test fun editorRequestsHighestRefreshRate() {
+    /**
+     * The editor asks for the display's fastest mode (120 Hz on a Tab S9; the emulator only has 60 Hz) while something
+     * happens, and withdraws the request when everything is still.
+     */
+    @Test fun editorRequestsHighestRefreshRateWhileActive() {
         val s = launch(note(ExcalidrawScene.empty().toJson(), "refresh"))
-        s.onActivity { a ->
-            val d = a.display!!
-            val best = d.supportedModes.filter { it.physicalWidth == d.mode.physicalWidth && it.physicalHeight == d.mode.physicalHeight }.maxBy { it.refreshRate }
-            log("refresh: modes ${d.supportedModes.joinToString { "%.0f".format(it.refreshRate) }} Hz, requested mode ${a.window.attributes.preferredDisplayModeId} (best ${best.modeId}, ${"%.0f".format(best.refreshRate)} Hz)")
-            assertEquals(best.modeId, a.window.attributes.preferredDisplayModeId)
-            assertEquals(best.refreshRate, field<CanvasSurface>(a, "surface").preferredFrameRate, 0.01f)
-        }
+        var act: EditorActivity? = null; s.onActivity { act = it }
+        val a = act!!
+        fun mode(): Int { var m = 0; s.onActivity { m = it.window.attributes.preferredDisplayModeId }; return m }
+        var best = 0; var bestHz = 0f
+        s.onActivity { val d = it.display!!; val b = d.supportedModes.filter { m -> m.physicalWidth == d.mode.physicalWidth && m.physicalHeight == d.mode.physicalHeight }.maxBy { m -> m.refreshRate }; best = b.modeId; bestHz = b.refreshRate }
+        SystemClock.sleep(2200)
+        assertEquals("idle: no request (display may slow down)", 0, mode())
+        assertEquals(false, a.fastRefresh)
+        val r = surfaceRect(s)
+        val down = gesture(wave(r, r.exactCenterY()), lift = false)
+        assertEquals("drawing: fastest mode requested", best, mode())
+        assertEquals(bestHz, field<CanvasSurface>(a, "surface").preferredFrameRate, 0.01f)
+        inject(event(MotionEvent.ACTION_UP, down, r.exactCenterX(), r.exactCenterY(), 0.5f, MotionEvent.TOOL_TYPE_STYLUS))
+        SystemClock.sleep(2200)
+        assertEquals("still again: request withdrawn", 0, mode())
+        assertEquals(0f, field<CanvasSurface>(a, "surface").preferredFrameRate, 0.01f)
+        log("refresh: ${"%.0f".format(bestHz)} Hz requested while drawing, released when idle")
         s.close()
     }
 

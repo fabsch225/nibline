@@ -107,12 +107,12 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
 
     fun release() { renderer?.release(true); renderer = null }
 
-    /** Frame rate this surface wants (the display's fastest mode); set by the activity. */
+    /** Frame rate this surface wants (the display's fastest mode while active, 0 = no preference); set by the activity. */
     var preferredFrameRate = 0f
         set(v) { field = v; applyFrameRate() }
 
     private fun applyFrameRate() {
-        if (android.os.Build.VERSION.SDK_INT < 30 || preferredFrameRate <= 0f) return
+        if (android.os.Build.VERSION.SDK_INT < 30) return // 0 = no preference (lets the display slow down)
         val s = holder.surface
         if (s.isValid) runCatching { s.setFrameRate(preferredFrameRate, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT) }
     }
