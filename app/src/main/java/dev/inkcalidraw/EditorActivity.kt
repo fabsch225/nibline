@@ -95,6 +95,13 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private var eraserCursor: FloatArray? = null
     private var hint: String? = null
     private val holdForMenu = Runnable { onButtonHold() }
+    // finger long-press opens the same menu (also in pen-only mode, where fingers navigate)
+    private var holdX = 0f; private var holdY = 0f
+    private var pressureLevel = PenPressure.MEDIUM
+    private val fingerHold = Runnable {
+        // not for a palm resting while the pen is near
+        if (lastFingerCount == 1 && SystemClock.uptimeMillis() - lastPenNear > 400) { lastFingerCount = 0; showCanvasMenu(holdX, holdY) }
+    }
 
     // ---- finger navigation ----
     private var lastFocusX = 0f
@@ -129,6 +136,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private var flingFrame: android.view.Choreographer.FrameCallback? = null
 
     private val pickPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { insertPdf(it) } }
+    private var menuAt: FloatArray? = null
+    private val pickImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { insertImage(it, menuAt) } }
     private val exportPdf = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri -> uri?.let { writePdf(it) } }
 
     // =============================================================== lifecycle
@@ -140,6 +149,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         store = NoteStore(this)
         colors = ColorHistory(this)
         penOnly = getSharedPreferences("ui", 0).getBoolean("penOnly", true)
+        pressureLevel = PenPressure.level(this)
 
         folder = intent.getStringExtra(EXTRA_FOLDER)?.let { store.folder(Uri.parse(it)) } ?: externalFolder(intent?.data) ?: store.root()
         // PDFs annotated by this note live next to it (or in app storage for notes opened from elsewhere).
@@ -221,7 +231,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val frameId = if (meta.paged && n > 0) Pages.pageAt(Pages.pages(scene), pts[0][0].toDouble(), pts[0][1].toDouble())?.id else null
         val brush = activeProfile().id.takeIf { it != "pen" }
         val pts2 = if (pts.size == 1) listOf(pts[0], pts[0]) else pts
-        return ExcalidrawScene.newFreedraw(pts2, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush).json
+        return ExcalidrawScene.newFreedraw(pts2, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush, exactPath = true).json
     }
 
     private fun showLivePanel() {
@@ -469,7 +479,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun pressureOf(ev: MotionEvent, idx: Int, h: Int): Float {
         val p = if (h < 0) ev.getPressure(idx) else ev.getHistoricalPressure(idx, h)
         // Constant-width profiles store 0.5 everywhere, which Excalidraw also renders at constant width.
-        return if (ev.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER || !activeProfile().pressure) 0.5f else p.coerceIn(0f, 1f)
+        return if (ev.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER || !activeProfile().pressure) 0.5f else PenPressure.curve(p.coerceIn(0f, 1f), pressureLevel)
     }
 
     private fun addSample(x: Float, y: Float, p: Float) {
@@ -558,7 +568,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val frameId = if (meta.paged) Pages.pageAt(Pages.pages(scene), pts[0][0].toDouble(), pts[0][1].toDouble())?.id else null
         pushUndo()
         val brush = activeProfile().id.takeIf { it != "pen" }
-        scene.elements.add(ExcalidrawScene.newFreedraw(pts, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush))
+        scene.elements.add(ExcalidrawScene.newFreedraw(pts, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush, exactPath = true))
         markDirty()
         Live.wetEnd()
         surface.commitWet(buildFrame()) // scene with the new stroke replaces the wet ink atomically
@@ -569,17 +579,26 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun onButtonHold() {
         if (g != G.BUTTON) return
         g = G.NONE; eraserCursor = null; redraw()
-        val at = toWorld(downX, downY)
-        menuAnchor.x = downX; menuAnchor.y = downY
+        showCanvasMenu(downX, downY)
+    }
+
+    /** Select / paste / insert menu at a screen position (pen button hold or finger long-press). */
+    private fun showCanvasMenu(sx: Float, sy: Float) {
+        val at = toWorld(sx, sy)
+        menuAt = at
+        menuAnchor.x = sx; menuAnchor.y = sy
+        surface.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
         PopupMenu(this, menuAnchor).apply {
-            menu.add("Lasso select")
             menu.add("Paste here")
+            menu.add("Insert image…")
+            menu.add("Lasso select")
             menu.add(if (meta.paged) "Select all on page" else "Select all")
             if (selected.isNotEmpty()) { menu.add("Duplicate selection"); menu.add("Delete selection") }
             setOnMenuItemClickListener {
                 when (it.title.toString()) {
                     "Lasso select" -> { lassoArmed = true; toast("Draw a lasso around what you want to select") }
                     "Paste here" -> pasteFromClipboard(at)
+                    "Insert image…" -> pickImage.launch(arrayOf("image/*"))
                     "Select all" -> setSelection(scene.elements.filter { e -> !e.isDeleted && !e.locked && e.type != "frame" }.map { e -> e.id }.toSet())
                     "Select all on page" -> {
                         val page = Pages.pageAt(Pages.pages(scene), at[0].toDouble(), at[1].toDouble())
@@ -791,6 +810,11 @@ class EditorActivity : ComponentActivity(), Live.Source {
         lastFocusY = f.map { ev.getY(it) }.average().toFloat()
         lastSpan = span(ev, f, lastFocusX, lastFocusY)
         lastMoveTime = SystemClock.uptimeMillis()
+        main.removeCallbacks(fingerHold)
+        if (f.size == 1 && ev.actionMasked == MotionEvent.ACTION_DOWN && SystemClock.uptimeMillis() - lastPenNear > 400) {
+            holdX = lastFocusX; holdY = lastFocusY
+            main.postDelayed(fingerHold, android.view.ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(450))
+        }
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             zoomedThisGesture = false; fingerVx = 0f; fingerVy = 0f; recentN = 0
             recordFocus(ev.eventTime, ev.getY(0))
@@ -819,6 +843,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         fingerVx = 0.7f * fingerVx + 0.3f * ((fx - lastFocusX) * 1000f / dt)
         // finger speed from the events' own timestamps (touch moves arrive batched, so handling time is unreliable)
         recordFocus(ev.eventTime, fy)
+        if (hypot(fx - holdX, fy - holdY) > ui.dp(10)) main.removeCallbacks(fingerHold)
         velocity?.let { vt -> vt.computeCurrentVelocity(1000, 30000f); fingerVy = f.map { vt.getYVelocity(ev.getPointerId(it)) }.average().toFloat() }
         if (fingerVy == 0f) fingerVy = recentVelocity()
         lastMoveTime = now
@@ -847,6 +872,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     }
 
     private fun fingersReleased() {
+        main.removeCallbacks(fingerHold)
         lastFingerCount = 0
         // vertical momentum (not after pinching, not while "release to add a page" is showing)
         val vt = velocity; velocity = null
@@ -1400,6 +1426,9 @@ class EditorActivity : ComponentActivity(), Live.Source {
             val cur = Ui.themeSetting(this@EditorActivity)
             for ((k, l) in listOf("system" to "Follow system", "light" to "Light", "dark" to "Dark")) theme.add(1, 0, 0, l).apply { isCheckable = true; isChecked = cur == k }
             theme.setGroupCheckable(1, true, true)
+            val pressure = menu.addSubMenu("Pen pressure")
+            PenPressure.levels.forEachIndexed { i, (k, l) -> pressure.add(2, 10 + i, 0, if (k == PenPressure.LOW) "$l (even width)" else l).apply { isCheckable = true; isChecked = pressureLevel == k } }
+            pressure.setGroupCheckable(2, true, true)
             if (meta.paged) {
                 menu.add("Add page")
                 menu.add(if (meta.direction == PageDirection.VERTICAL) "Scroll pages horizontally" else "Scroll pages vertically")
@@ -1411,6 +1440,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             setOnMenuItemClickListener {
                 val t = it.title.toString()
                 when {
+                    it.itemId in 10..12 -> { pressureLevel = PenPressure.levels[it.itemId - 10].first; PenPressure.setLevel(this@EditorActivity, pressureLevel); toast("Pen pressure: ${PenPressure.levels[it.itemId - 10].second.lowercase()}") }
                     it.itemId == 1 -> { penOnly = !penOnly; getSharedPreferences("ui", 0).edit().putBoolean("penOnly", penOnly).apply(); toast(if (penOnly) "Fingers navigate, only the pen draws" else "Fingers draw too; use two fingers to navigate") }
                     t == "Follow system" -> { Ui.setThemeSetting(this@EditorActivity, "system"); saveNow(); recreate() }
                     t == "Light" -> { Ui.setThemeSetting(this@EditorActivity, "light"); saveNow(); recreate() }

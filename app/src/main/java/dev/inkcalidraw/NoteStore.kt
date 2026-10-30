@@ -87,11 +87,27 @@ class NoteStore(private val context: Context) {
         context.contentResolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { it.write(text) }
     }
 
+    /**
+     * Renames a note; returns its new uri (content uris change when renamed), or null if that failed.
+     * DocumentFile.renameTo can't be used for documents in a chosen folder: those are SingleDocumentFiles, which
+     * throw on rename, so this goes through DocumentsContract directly.
+     */
     fun rename(uri: Uri, folder: DocumentFile, newName: String, ext: String = EXT): Uri? {
-        val f = doc(uri) ?: return null
-        val name = uniqueName(folder, newName.trim().ifEmpty { "Untitled" }, ext, except = f.name)
-        return if (f.renameTo(name + ext)) f.uri else null
+        val current = queryName(uri) ?: doc(uri)?.name
+        val name = uniqueName(folder, newName.trim().ifEmpty { "Untitled" }, ext, except = current) + ext
+        if (name == current) return uri
+        return runCatching {
+            if (uri.scheme == "file") {
+                val src = File(uri.path!!); val dst = File(src.parentFile, name)
+                if (src.renameTo(dst)) Uri.fromFile(dst) else null
+            } else DocumentsContract.renameDocument(context.contentResolver, uri, name)
+        }.getOrNull()
     }
+
+    private fun queryName(uri: Uri): String? = runCatching {
+        if (uri.scheme == "file") File(uri.path!!).name
+        else context.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+    }.getOrNull()
 
     fun delete(uri: Uri): Boolean = doc(uri)?.delete() ?: false
 

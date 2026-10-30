@@ -17,7 +17,7 @@ class Ui private constructor(val dark: Boolean, private val density: Float) {
     val accentSoft = if (dark) Color.parseColor("#4a241b") else Color.parseColor("#fde2db")
     val divider = if (dark) Color.parseColor("#34343b") else Color.parseColor("#e3e3ea")
     /** Area around pages in paged notes. */
-    val desk = if (dark) Color.parseColor("#0b0b0d") else Color.parseColor("#e6e6ec")
+    val desk = if (dark) Color.parseColor("#2e2e35") else Color.parseColor("#e6e6ec") // dark: lighter than the (dark) pages
 
     fun dp(v: Number) = v.toFloat() * density
     fun dpi(v: Number) = (v.toFloat() * density).toInt()

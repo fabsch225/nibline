@@ -221,6 +221,8 @@ class ExcalidrawScene(
             opacity: Int = 100,
             frameId: String? = null,
             brush: String? = null,
+            /** Pre-compensate perfect-freehand's streamline so the stroke renders exactly along the pen path. */
+            exactPath: Boolean = false,
         ): Element {
             require(samples.isNotEmpty())
             // Excalidraw discards freedraw elements with < 2 points on load; a tap in Excalidraw
@@ -229,7 +231,8 @@ class ExcalidrawScene(
             val samples = if (samples.size == 1) listOf(samples[0], samples[0].copyOf()) else samples
             val ox = samples[0][0].toDouble()
             val oy = samples[0][1].toDouble()
-            val rel = samples.map { doubleArrayOf(r2(it[0] - ox), r2(it[1] - oy)) }
+            var rel = samples.map { doubleArrayOf(r2(it[0] - ox), r2(it[1] - oy), it[2].toDouble()) }
+            if (exactPath) rel = PerfectFreehand.exactPathInput(rel, PerfectFreehand.excalidrawOptions(strokeWidth, simulatePressure = false, last = false), round = true)
             val minX = rel.minOf { it[0] }; val maxX = rel.maxOf { it[0] }
             val minY = rel.minOf { it[1] }; val maxY = rel.maxOf { it[1] }
             val now = System.currentTimeMillis()

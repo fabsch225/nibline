@@ -156,9 +156,9 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         val input = ArrayList<DoubleArray>(w.total)
         for (i in 0 until w.total) input.add(doubleArrayOf(w.samples[i * 3].toDouble(), w.samples[i * 3 + 1].toDouble(), w.samples[i * 3 + 2].toDouble()))
         val opts = PerfectFreehand.excalidrawOptions(w.strokeWidth, simulatePressure = false, last = false)
-        // Same input massaging ExcalidrawScene.newFreedraw does (a dot is stored as two equal points).
+        // Same input massaging ExcalidrawScene.newFreedraw does (a dot is stored as two equal points; exact path).
         if (input.size == 1) input.add(input[0].copyOf())
-        val strokePoints = PerfectFreehand.getStrokePoints(input, opts)
+        val strokePoints = PerfectFreehand.getStrokePoints(PerfectFreehand.exactPathInput(input, opts), opts)
         val outline = PerfectFreehand.getStrokeOutlinePoints(strokePoints, opts)
         val path = SceneRenderer.outlinePath(outline)
 

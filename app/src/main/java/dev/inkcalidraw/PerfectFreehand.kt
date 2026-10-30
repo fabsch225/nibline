@@ -78,6 +78,50 @@ object PerfectFreehand {
     fun getStroke(points: List<DoubleArray>, o: Options): List<DoubleArray> =
         getStrokeOutlinePoints(getStrokePoints(points, o), o)
 
+    /**
+     * Pre-compensates perfect-freehand's streamline so the rendered stroke goes exactly through the given points.
+     *
+     * getStrokePoints() pulls every point towards the previous one (point = prev + (input - prev) * t), which makes
+     * strokes lag and cut corners - small features like the hook of an "i" get rounded off. Storing
+     * input' = prev + (wanted - prev) / t instead makes that step land exactly on the pen position, in any renderer
+     * that uses Excalidraw's algorithm (Excalidraw itself, Obsidian, the live viewer, this app). Points that
+     * perfect-freehand skips anyway (the start of a stroke, before it reaches its minimum length) are left as they are.
+     *
+     * [round] = round each result to 0.01, as stored in files, and continue from the rounded value (so the
+     * compensation matches what a renderer will compute from the file).
+     */
+    fun exactPathInput(points: List<DoubleArray>, o: Options, round: Boolean = false): List<DoubleArray> {
+        if (points.size <= 2 || o.streamline == 0.0) return points // perfect-freehand special-cases tiny strokes
+        val t = 0.15 + (1 - o.streamline) * 0.85
+        fun r(v: Double) = if (round) Math.round(v * 100) / 100.0 else v
+        val out = ArrayList<DoubleArray>(points.size)
+        out += points[0]
+        var px = points[0][0]; var py = points[0][1]
+        var running = 0.0
+        var reached = false
+        val maxI = points.size - 1
+        for (i in 1..maxI) {
+            val a = points[i]
+            val rest = if (a.size > 2) a.copyOfRange(2, a.size) else DoubleArray(0)
+            val accept = reached || i == maxI || running + hypot(a[0] - px, a[1] - py) >= o.size
+            if (!accept) {
+                // still inside the skipped start: store as is, and track what perfect-freehand will compute
+                out += a
+                val lx = px + (a[0] - px) * t; val ly = py + (a[1] - py) * t
+                if (lx != px || ly != py) running += hypot(lx - px, ly - py)
+                continue
+            }
+            val cx = r(px + (a[0] - px) / t); val cy = r(py + (a[1] - py) / t)
+            out += doubleArrayOf(cx, cy, *rest)
+            val lx = px + (cx - px) * t; val ly = py + (cy - py) * t
+            if (lx == px && ly == py) continue
+            running += hypot(lx - px, ly - py)
+            reached = true
+            px = lx; py = ly
+        }
+        return out
+    }
+
     fun getStrokePoints(input: List<DoubleArray>, o: Options): List<StrokePoint> {
         if (input.isEmpty()) return emptyList()
         val t = 0.15 + (1 - o.streamline) * 0.85

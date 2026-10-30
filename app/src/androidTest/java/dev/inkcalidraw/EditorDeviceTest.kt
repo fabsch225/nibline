@@ -442,6 +442,15 @@ class EditorDeviceTest {
         assertEquals(null, device.findObject(By.textContains("Allow access")))
         shot("21-link-second-open")
         device.pressBack()
+
+        // renaming a note in a chosen folder (SAF) changes the real file
+        val hit = VaultResolver.resolve(ctx, VaultLink.parse(link)!!, VaultResolver.grantedTrees(ctx))!!
+        val folderDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, hit.folder!!)!!
+        val renamed = store.rename(hit.file, folderDoc, "Week 3 renamed")
+        assertNotNull("rename in a chosen folder", renamed)
+        val listing = sh("ls '/sdcard/Documents/Uni/Lectures/'")
+        log("rename in chosen folder: ${listing.trim().replace("\n", ", ")}")
+        assertTrue("file renamed on disk", listing.contains("Week 3 renamed.excalidraw") && !listing.contains("Week 3.excalidraw"))
     }
 
     /**
@@ -700,6 +709,38 @@ class EditorDeviceTest {
         assertTrue("horizontal dragging works again after Fit page", kotlin.math.abs(f2[Matrix.MTRANS_X] - e[Matrix.MTRANS_X]) > 150f)
         shot("28-navigation")
         s.close()
+    }
+
+    /** Finger long-press opens the canvas menu (also with "draw with pen only"); dark-mode pages stand out from the desk. */
+    @Test fun fingerLongPressMenuAndDarkPages() {
+        val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "menu"))
+        val r = surfaceRect(s)
+        val down = SystemClock.uptimeMillis()
+        inject(event(MotionEvent.ACTION_DOWN, down, r.exactCenterX(), r.exactCenterY(), 0.5f, MotionEvent.TOOL_TYPE_FINGER))
+        SystemClock.sleep(900)
+        assertNotNull("long-press menu opens", device.wait(Until.findObject(By.text("Insert image…")), 3000))
+        assertNotNull(device.findObject(By.text("Paste here")))
+        shot("29-finger-menu")
+        inject(event(MotionEvent.ACTION_UP, down, r.exactCenterX(), r.exactCenterY(), 0.5f, MotionEvent.TOOL_TYPE_FINGER))
+        device.pressBack(); SystemClock.sleep(300)
+        // a quick drag must not open it
+        gesture((0..20).map { i -> floatArrayOf(r.exactCenterX(), r.exactCenterY() - i * 10f, 0.5f) }, tool = MotionEvent.TOOL_TYPE_FINGER, stepMs = 10)
+        SystemClock.sleep(900)
+        assertEquals(null, device.findObject(By.text("Insert image…")))
+        s.close()
+
+        Ui.setThemeSetting(ctx, "dark")
+        try {
+            val d = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "dark pages"))
+            val rr = surfaceRect(d)
+            val b = shot("30-dark-pages")
+            val page = b.getPixel(rr.centerX(), rr.centerY())
+            val desk = b.getPixel(rr.left + 20, rr.centerY())
+            fun lum(c: Int) = 0.2126 * Color.red(c) + 0.7152 * Color.green(c) + 0.0722 * Color.blue(c)
+            log("dark mode: page luminance ${"%.0f".format(lum(page))}, desk ${"%.0f".format(lum(desk))}")
+            assertTrue("dark pages stand out from the desk", kotlin.math.abs(lum(desk) - lum(page)) > 18)
+            d.close()
+        } finally { Ui.setThemeSetting(ctx, "light") }
     }
 
     /** Overview screenshots of the toolbar and its submenus. */

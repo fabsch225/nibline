@@ -54,6 +54,7 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
     private val text = Paint(Paint.ANTI_ALIAS_FLAG)
     private val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(40, 0, 0, 0) }
+    private val pageEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.parseColor("#4a4a53") }
 
     fun color(c: Int) = if (dark) Ui.darkTransform(c) else c
 
@@ -78,6 +79,8 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
                 c.drawRect(r, fill)
                 if (f.pdfFile == null) drawPaper(c, r, f.backgroundKind)
             }
+            // dark mode: a hairline edge so dark pages stand out from the desk
+            if (dark && input.paged) { pageEdge.strokeWidth = 1f / input.scale.coerceAtLeast(0.01f); c.drawRect(r, pageEdge) }
         }
         val frames = HashMap<String, RectF>()
         for (el in input.elements) if (el.type == "frame" && !el.isDeleted) {

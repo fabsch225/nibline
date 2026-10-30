@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Live mirror (streams the open note to the relay while Live is on) -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="Inkcalidraw" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:hardwareAccelerated="true">
+    <application android:label="Inkcalidraw" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:hardwareAccelerated="true">
         <activity android:name=".NotesActivity" android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density">
             <intent-filter>
