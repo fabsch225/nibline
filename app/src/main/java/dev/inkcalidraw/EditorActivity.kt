@@ -761,10 +761,11 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     /** Keeps scrolling after a fast vertical swipe, slowing down; stops at the first/last page or on touch. */
     private fun startFling(vy: Float) {
-        val range = verticalRange() ?: return
+        val range = verticalRange()
         val v = FloatArray(9).also { view.getValues(it) }
         val ty = v[Matrix.MTRANS_Y].toInt()
-        if (ty < range.first || ty > range.second) return
+        android.util.Log.d("InkNav", "fling: vy=$vy ty=$ty range=$range")
+        if (range == null || ty < range.first || ty > range.second) return
         stopFling()
         fling.fling(0, ty, 0, vy.toInt(), 0, 0, range.first, range.second)
         var last = ty
@@ -772,7 +773,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val cb = object : android.view.Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 if (flingFrame !== this) return
-                if (!fling.computeScrollOffset()) { flingFrame = null; return }
+                if (!fling.computeScrollOffset()) { android.util.Log.d("InkNav", "fling done at ${fling.currY}"); flingFrame = null; return }
                 val y = fling.currY
                 view.postTranslate(0f, (y - last).toFloat()); last = y
                 redraw()
