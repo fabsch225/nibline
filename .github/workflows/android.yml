@@ -2,7 +2,7 @@ name: Build prototype APK
 
 on:
   push:
-    branches: [inkcalidraw]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
