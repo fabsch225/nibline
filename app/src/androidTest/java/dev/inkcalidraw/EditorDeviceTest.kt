@@ -670,7 +670,7 @@ class EditorDeviceTest {
         assertTrue("slow drags stay close to 1:1 ($slowDy)", slowDy < -170f && slowDy > -280f)
 
         val c = m()
-        drag(0f, -600f, 6, 0) // fast flick up (the emulator delivers ~20 ms per injected event)
+        drag(0f, -600f, 6, 3) // fast flick up
         val atLift = m()
         SystemClock.sleep(1200)
         val d = m()

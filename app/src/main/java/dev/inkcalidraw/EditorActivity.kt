@@ -110,6 +110,21 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private var velocity: android.view.VelocityTracker? = null
     private var fingerVy = 0f   // finger speed for scroll acceleration (px/s)
     @Volatile var lastReleaseVelocity = 0f; private set // for tests
+    // recent finger positions (event time ms, focus y) as a fallback speed estimate
+    private val recentT = LongArray(16); private val recentY = FloatArray(16); private var recentN = 0
+
+    private fun recordFocus(t: Long, y: Float) { val i = recentN % 16; recentT[i] = t; recentY[i] = y; recentN++ }
+
+    /** Focus speed over the last ~100 ms of movement (px/s), from event timestamps. */
+    private fun recentVelocity(): Float {
+        if (recentN < 2) return 0f
+        val li = (recentN - 1) % 16
+        var j = recentN - 2
+        while (j >= maxOf(0, recentN - 16) && recentT[li] - recentT[j % 16] < 100) j--
+        val oi = (maxOf(j, maxOf(0, recentN - 16))) % 16
+        val dt = recentT[li] - recentT[oi]
+        return if (dt <= 0) 0f else (recentY[li] - recentY[oi]) * 1000f / dt
+    }
     private val fling by lazy { android.widget.OverScroller(this, DecelerateInterpolator(1.2f)) }
     private var flingFrame: android.view.Choreographer.FrameCallback? = null
 
@@ -777,7 +792,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
         lastSpan = span(ev, f, lastFocusX, lastFocusY)
         lastMoveTime = SystemClock.uptimeMillis()
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            zoomedThisGesture = false; fingerVx = 0f; fingerVy = 0f
+            zoomedThisGesture = false; fingerVx = 0f; fingerVy = 0f; recentN = 0
+            recordFocus(ev.eventTime, ev.getY(0))
             velocity?.recycle(); velocity = android.view.VelocityTracker.obtain()
         }
         velocity?.addMovement(ev)
@@ -802,7 +818,9 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val dt = (now - lastMoveTime).coerceAtLeast(1)
         fingerVx = 0.7f * fingerVx + 0.3f * ((fx - lastFocusX) * 1000f / dt)
         // finger speed from the events' own timestamps (touch moves arrive batched, so handling time is unreliable)
+        recordFocus(ev.eventTime, fy)
         velocity?.let { vt -> vt.computeCurrentVelocity(1000, 30000f); fingerVy = f.map { vt.getYVelocity(ev.getPointerId(it)) }.average().toFloat() }
+        if (fingerVy == 0f) fingerVy = recentVelocity()
         lastMoveTime = now
         // Vertical acceleration: 1:1 when moving slowly (precise), up to 2.5x for fast swipes. Horizontal stays 1:1,
         // and is off entirely while the width is locked ("Fit width").
@@ -833,7 +851,10 @@ class EditorActivity : ComponentActivity(), Live.Source {
         // vertical momentum (not after pinching, not while "release to add a page" is showing)
         val vt = velocity; velocity = null
         var vy = 0f
-        if (vt != null) { vt.computeCurrentVelocity(1000, 30000f); vy = if (abs(fingerVy) > abs(vt.yVelocity)) fingerVy else vt.yVelocity; vt.recycle() }
+        if (vt != null) { vt.computeCurrentVelocity(1000, 30000f); vy = vt.yVelocity; vt.recycle() }
+        val rv = recentVelocity()
+        if (abs(rv) > abs(vy)) vy = rv
+        android.util.Log.d("InkNav", "release: tracker=${vt != null} vy=$vy recent=$rv fingerVy=$fingerVy zoomed=$zoomedThisGesture hint=$hint")
         lastReleaseVelocity = vy
         val flingUp = !zoomedThisGesture && hint == null && abs(vy) > 900 * resources.displayMetrics.density &&
             (!meta.paged || meta.direction == PageDirection.VERTICAL || abs(vy) > abs(fingerVx) * 1.5f)
