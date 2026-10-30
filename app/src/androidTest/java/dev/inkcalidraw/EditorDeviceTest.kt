@@ -546,7 +546,6 @@ class EditorDeviceTest {
     @Test fun freezeDiagnostics() {
         fun pick(a: EditorActivity, t: EditorActivity.Tool) = EditorActivity::class.java.getDeclaredMethod("selectTool", EditorActivity.Tool::class.java).apply { isAccessible = true }.invoke(a, t)
         val variants = linkedMapOf<String, (ActivityScenario<EditorActivity>, Rect) -> Unit>(
-            "nothing" to { _, _ -> },
             "tap-eraser-button" to { _, _ -> device.findObject(By.desc("Eraser")).click(); SystemClock.sleep(400) },
             "erase-gesture-no-toolbar" to { s, r -> s.onActivity { pick(it, EditorActivity.Tool.ERASER) }; gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 39f), 0.5f) }); SystemClock.sleep(400) },
             "button-erase-gesture" to { _, r -> gesture((0 until 40).map { i -> floatArrayOf(r.left + r.width() * 0.3f, r.top + r.height() * (0.2f + 0.6f * i / 39f), 0.5f) }, buttons = MotionEvent.BUTTON_STYLUS_PRIMARY); SystemClock.sleep(400) },
@@ -571,6 +570,13 @@ class EditorDeviceTest {
             for (yy in (y - 60).toInt() until (y + 60).toInt() step 2) for (xx in (r.left + r.width() * 0.36f).toInt() until (r.left + r.width() * 0.64f).toInt() step 2)
                 if (abs(Color.red(after.getPixel(xx, yy)) - Color.red(before.getPixel(xx, yy))) > 60) changed++
             log("diag $name: strokes=${live(s, "freedraw")} frames ${f0}->${f1} changedPixels=$changed")
+            if (f1 == f0) {
+                // stuck: where are the app's threads? (the test runs in the app's process)
+                for ((t, st) in Thread.getAllStackTraces()) {
+                    if (st.none { it.className.startsWith("dev.inkcalidraw") || it.className.startsWith("androidx.graphics") }) continue
+                    log("  thread '${t.name}' ${t.state}:\n" + st.take(28).joinToString("\n") { "      at $it" })
+                }
+            }
             s.close()
         }
     }
