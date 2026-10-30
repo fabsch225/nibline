@@ -13,8 +13,8 @@ class Ui private constructor(val dark: Boolean, private val density: Float) {
     val surface = if (dark) Color.parseColor("#26262b") else Color.WHITE
     val text = if (dark) Color.parseColor("#e3e3e8") else Color.parseColor("#1e1e1e")
     val subtext = if (dark) Color.parseColor("#9a9aa5") else Color.parseColor("#6b6b75")
-    val accent = Color.parseColor(if (dark) "#a8a5ff" else "#6965db")
-    val accentSoft = if (dark) Color.parseColor("#33325a") else Color.parseColor("#e0dfff")
+    val accent = Color.parseColor(if (dark) "#ff7657" else "#e5432a") // brand orange
+    val accentSoft = if (dark) Color.parseColor("#4a241b") else Color.parseColor("#fde2db")
     val divider = if (dark) Color.parseColor("#34343b") else Color.parseColor("#e3e3ea")
     /** Area around pages in paged notes. */
     val desk = if (dark) Color.parseColor("#0b0b0d") else Color.parseColor("#e6e6ec")

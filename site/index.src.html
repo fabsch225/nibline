@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkcalidraw: handwritten notes for Android tablets</title>
+<meta name="description" content="Handwritten notes and PDF annotation for Android tablets, saved as plain Excalidraw files. With an Obsidian plugin and a live web mirror.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/archivo.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  /* Archivo and Martian Mono (SIL Open Font License), served from this site */
+  @font-face { font-family: "Archivo"; src: url(fonts/archivo.woff2) format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
+  @font-face { font-family: "Martian Mono"; src: url(fonts/martian-mono.woff2) format("woff2"); font-weight: 100 800; font-stretch: 75% 112.5%; font-display: swap; }
+  :root {
+    --orange: #ee4b2b;
+    --black: #000;
+    --white: #fff;
+    --green: #a6f36a;
+    --rule: #dcdce2;
+    --ink: #1e1e1e;
+    --r: 32px;           /* ruling: everything on the paper sits on these lines */
+    --gut: clamp(16px, 4vw, 56px);
+    --max: 1280px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--white); color: var(--black); font: 450 17px/1.5 "Archivo", system-ui, sans-serif; font-stretch: 100%; }
+  a { color: inherit; }
+  :focus-visible { outline: 3px solid var(--orange); outline-offset: 3px; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gut); }
+
+  /* ruled A4 paper */
+  .paper {
+    background-color: var(--white);
+    background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--r) - 1px), var(--rule) calc(var(--r) - 1px) var(--r));
+  }
+
+  /* ---------------------------------------------------------------- hero */
+  .hero { padding: calc(var(--r) * 2) 0 calc(var(--r) * 6); overflow: hidden; }
+  .top { display: flex; justify-content: space-between; align-items: center; height: var(--r); font-size: 15px; }
+  .top nav { display: flex; gap: 22px; }
+  .top a { text-decoration: none; }
+  .top a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .mark { font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; }
+  h1 {
+    margin: calc(var(--r) * 2) 0 0; font-weight: 900; font-stretch: 125%; letter-spacing: -0.055em;
+    font-size: min(12.6vw, 164px); line-height: calc(var(--r) * 5); white-space: nowrap;
+  }
+  .flourish { display: block; width: min(100%, 1180px); height: auto; margin: calc(var(--r) * -1.4) 0 0 -0.5%; overflow: visible; }
+  .flourish .ink { fill: var(--ink); }
+  .flourish .draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.9s cubic-bezier(.45, .05, .3, 1) .25s forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  @media (prefers-reduced-motion: reduce) { .flourish .draw { animation: none; stroke-dashoffset: 0; } }
+  .lede { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--r) 48px; align-items: end; margin-top: var(--r); }
+  .lede p { margin: 0; max-width: 30ch; font-size: clamp(22px, 2.6vw, 30px); line-height: var(--r); font-stretch: 88%; font-weight: 500; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 24px; border-radius: 999px; border: 2.5px solid var(--black);
+    font: 700 17px/1 "Archivo"; font-stretch: 100%; text-decoration: none; background: var(--white); cursor: pointer; white-space: nowrap;
+  }
+  .btn.primary { background: var(--black); color: var(--white); }
+  .btn:hover { background: var(--orange); border-color: var(--orange); color: var(--black); }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+  .small { font-size: 14px; margin-top: 10px; opacity: .7; }
+
+  /* ---------------------------------------------------------------- tablet + features (orange poster) */
+  .poster { background: var(--orange); padding-bottom: clamp(56px, 8vw, 120px); }
+  .tablet {
+    position: relative; margin: calc(var(--r) * -4.5) auto 0; width: min(100%, 1000px); aspect-ratio: 1.6;
+    background: var(--black); border-radius: clamp(18px, 2.6vw, 34px); padding: clamp(10px, 1.6vw, 20px);
+  }
+  .screen { width: 100%; height: 100%; border-radius: clamp(6px, 1vw, 12px); background: #eeeef2; overflow: hidden; display: flex; flex-direction: column; }
+  .bar { flex: none; height: 9%; background: var(--white); border-bottom: 1px solid #e3e3ea; display: flex; align-items: center; gap: 2.2%; padding: 0 2.4%; font-size: clamp(8px, 1.3vw, 15px); font-weight: 500; }
+  .bar .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar i { display: block; width: 1.9%; aspect-ratio: 1; border-radius: 50%; flex: none; }
+  .bar .live { background: #2f9e44; box-shadow: 0 0 0 3px rgba(47, 158, 68, .2); }
+  .canvas { flex: 1; display: flex; justify-content: center; align-items: flex-start; padding-top: 2.2%; overflow: hidden; }
+  .page { height: 118%; aspect-ratio: 600 / 848; background: var(--white); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+  .page svg { width: 100%; height: 100%; display: block; }
+
+  .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 clamp(24px, 3vw, 48px); margin-top: clamp(56px, 8vw, 112px); }
+  .feature { border-top: 3px solid var(--black); padding: 18px 0 44px; }
+  .feature h3 { margin: 0 0 10px; font-size: clamp(30px, 3.2vw, 44px); line-height: .98; font-weight: 850; font-stretch: 72%; letter-spacing: -0.015em; }
+  .feature p { margin: 0; max-width: 34ch; font-size: 17px; line-height: 1.45; }
+
+  /* ---------------------------------------------------------------- live (black) */
+  .livesec { background: var(--black); color: var(--white); padding: clamp(72px, 10vw, 150px) 0; }
+  .livesec h2 { margin: 0; font-weight: 900; font-stretch: 125%; letter-spacing: -0.05em; font-size: clamp(48px, 10vw, 150px); line-height: .9; }
+  .livesec h2 .dot { display: inline-block; width: .2em; height: .2em; border-radius: 50%; background: var(--green); vertical-align: .55em; margin-left: .12em; animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .livesec h2 .dot { animation: none; } }
+  .livegrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px clamp(32px, 6vw, 96px); margin-top: 48px; align-items: start; }
+  .livegrid p { margin: 0 0 14px; max-width: 42ch; font-size: 19px; }
+  .watch { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+  .watch label { font-size: 15px; opacity: .75; }
+  .watch .row { display: flex; gap: 12px; }
+  .watch input {
+    flex: 1 1 0; min-width: 0; width: 1px; height: 72px; border-radius: 16px; border: 2.5px solid #5b5b63; background: transparent; color: var(--white); text-align: center;
+    font: 600 34px/1 "Martian Mono", ui-monospace, monospace; font-stretch: 112%; letter-spacing: .3em; padding-left: .3em; text-transform: uppercase;
+  }
+  .watch input:focus { border-color: var(--green); outline: none; }
+  .watch input::placeholder { color: #4a4a52; }
+  .watch button { height: 72px; padding: 0 30px; border-radius: 16px; border: 0; background: var(--orange); color: var(--black); font: 800 19px "Archivo"; cursor: pointer; }
+  .watch button:disabled { background: #2b2b31; color: #77777f; cursor: default; }
+
+  /* ---------------------------------------------------------------- file format (paper) */
+  .filesec { padding: calc(var(--r) * 4) 0 calc(var(--r) * 4); }
+  .filesec h2 { margin: 0; font-weight: 900; font-stretch: 125%; letter-spacing: -0.05em; font-size: clamp(44px, 8.5vw, 124px); line-height: calc(var(--r) * 4); }
+  .filegrid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--r) clamp(32px, 5vw, 80px); margin-top: var(--r); }
+  .filegrid p, .filegrid li { font-size: 19px; line-height: var(--r); }
+  .filegrid p { margin: 0 0 var(--r); max-width: 36ch; }
+  .filegrid ul { margin: 0; padding: 0; list-style: none; }
+  .filegrid li { padding-left: 28px; position: relative; }
+  .filegrid li::before { content: ""; position: absolute; left: 0; top: 13px; width: 14px; height: 6px; background: var(--green); border-radius: 3px; }
+  pre {
+    margin: 0; padding: 22px 24px; border: 2.5px solid var(--black); border-radius: 18px; background: var(--white); overflow: auto;
+    font: 400 13.5px/1.75 "Martian Mono", ui-monospace, monospace; font-stretch: 88%;
+  }
+  pre .k { color: #b8321a; }
+  pre .s { color: #1f6f2b; }
+  pre .c { color: #8a8a93; }
+
+  .tiles { height: clamp(80px, 10vw, 160px); background: var(--orange) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Cpath d='M0 40V0h40zM40 40h40V0zM0 80V40h40zM80 80H40V40z'/%3E%3C/svg%3E") 0 0 / 80px 80px repeat; }
+
+  footer { background: var(--black); color: #c9c9cf; font-size: 15px; padding: 44px 0 56px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 18px 40px; justify-content: space-between; }
+  footer .mark { color: var(--white); font-size: 22px; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 14px 26px; }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--white); text-decoration: underline; text-underline-offset: 4px; }
+
+  @media (max-width: 860px) {
+    .top nav a:not(:last-child) { display: none; }
+    .lede { grid-template-columns: minmax(0, 1fr); }
+    .features { grid-template-columns: minmax(0, 1fr); }
+    .livegrid, .filegrid { grid-template-columns: minmax(0, 1fr); }
+    .tablet { margin-top: calc(var(--r) * -3); }
+    .hero { padding-bottom: calc(var(--r) * 4); }
+  }
+  @media (max-width: 520px) {
+    .watch .row { flex-direction: column; }
+    .watch button { height: 60px; }
+    .btn { flex: 1; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero paper">
+  <div class="wrap">
+    <div class="top">
+      <span class="mark">inkcalidraw</span>
+      <nav aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#live">Live</a>
+        <a href="#file">File format</a>
+        <a href="https://github.com/fabsch225/inkcalidraw">GitHub</a>
+      </nav>
+    </div>
+    <h1>inkcalidraw</h1>
+    <svg class="flourish" viewBox="0 0 {{flourish.w}} {{flourish.h}}" aria-hidden="true">
+      <defs>
+        <mask id="reveal" maskUnits="userSpaceOnUse" x="-40" y="-60" width="1640" height="260">
+          <path class="draw" d="{{flourish.c}}" pathLength="1" fill="none" stroke="#fff" stroke-width="90" stroke-linecap="round" stroke-linejoin="round"/>
+        </mask>
+      </defs>
+      <path class="ink" d="{{flourish.d}}" mask="url(#reveal)"/>
+    </svg>
+    <div class="lede">
+      <p>Handwritten notes and PDF annotation for Android tablets, saved as plain Excalidraw files.</p>
+      <div>
+        <div class="actions">
+          <a class="btn primary" href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw.apk">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>
+            Download for Android
+          </a>
+          <a class="btn" href="#file">Obsidian plugin</a>
+        </div>
+        <div class="small">Android 10 or newer. Made on a Galaxy Tab S9.</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="poster" id="features" aria-label="Features">
+  <div class="wrap">
+    <div class="tablet" role="img" aria-label="The app on a tablet: a lecture PDF with handwritten highlights, a circle, an arrow and margin notes">
+      <div class="screen">
+        <div class="bar">
+          <span class="title">Signals and Systems, lecture 3</span>
+          <i style="background:#1e1e1e"></i><i style="background:#e03131"></i><i style="background:#1971c2"></i><i class="live"></i>
+        </div>
+        <div class="canvas">
+          <div class="page">
+            <svg viewBox="0 0 600 848">
+              <g font-family="Georgia, 'Times New Roman', serif" fill="#222">
+                <text x="60" y="104" font-size="34">Fourier series</text>
+                <text x="60" y="140" font-size="15" fill="#666">Periodic signals as sums of sinusoids</text>
+                <line x1="60" y1="170" x2="540" y2="170" stroke="#ddd"/>
+                <text x="60" y="545" font-size="19" font-style="italic">f(t) = a₀/2 + Σ (aₙ cos nωt + bₙ sin nωt)</text>
+                <circle cx="66" cy="626" r="3"/><text x="80" y="631" font-size="16">Coefficients from inner products</text>
+                <circle cx="66" cy="660" r="3"/><text x="80" y="665" font-size="16">Gibbs overshoot near jumps</text>
+                <circle cx="120" cy="700" r="3"/><text x="134" y="705" font-size="16">Converges in mean square</text>
+              </g>
+              <g fill="none" stroke-width="1.4">
+                <line x1="60" y1="300" x2="540" y2="300" stroke="#999"/>
+                <line x1="80" y1="200" x2="80" y2="420" stroke="#999"/>
+                <path d="M80 360 L200 360 L200 240 L320 240 L320 360 L440 360 L440 240 L540 240" stroke="#c9c9cf" stroke-dasharray="4 4"/>
+                <path d="M80 352 C110 352 130 372 150 350 S180 236 205 250 S240 238 260 245 S300 232 318 260 S330 362 350 352 S400 368 420 350 S440 236 465 250 S500 238 520 245 L540 240" stroke="#1971c2" stroke-width="2"/>
+              </g>
+              <path d="{{highlight.d}}" fill="#a6f36a" opacity=".55" style="mix-blend-mode:multiply"/>
+              <path d="{{circle.d}}" fill="#e03131"/>
+              <path d="{{arrow.d}}" fill="#1e1e1e"/>
+              <path d="{{note.d}}" fill="#1e1e1e"/>
+              <path d="{{underline.d}}" fill="#ee4b2b"/>
+              <path d="{{check.d}}" fill="#2f9e44"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="features">
+      <div class="feature">
+        <h3>Ink that keeps up</h3>
+        <p>Strokes appear right under the pen tip and look the same after you lift it, and the same again in Excalidraw.</p>
+      </div>
+      <div class="feature">
+        <h3>Write on your PDFs</h3>
+        <p>Import slides or papers, even hundreds of pages long. Add blank pages anywhere in between for working.</p>
+      </div>
+      <div class="feature">
+        <h3>Real pages</h3>
+        <p>A4 in portrait or landscape. Swipe past the last page to add another. Fit the page or the width, edge to edge.</p>
+      </div>
+      <div class="feature">
+        <h3>The pen draws, fingers move</h3>
+        <p>Fingers scroll and zoom while the pen draws, so your hand can rest on the screen. Hold the S Pen button to erase, or hold it still to select and paste.</p>
+      </div>
+      <div class="feature">
+        <h3>Pens that feel different</h3>
+        <p>Pen, fineliner, pencil, chalk and highlighter, with fine sizes and your last colors one tap away.</p>
+      </div>
+      <div class="feature">
+        <h3>Your folders, your files</h3>
+        <p>Keep notes in any folder, like an Obsidian vault, and sync them however you want. Paste images straight in.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="livesec" id="live" aria-labelledby="live-h">
+  <div class="wrap">
+    <h2 id="live-h">Watch it live<span class="dot" aria-hidden="true"></span></h2>
+    <div class="livegrid">
+      <div>
+        <p>Turn on Live on the tablet and anyone with the five-letter code can follow along in a browser: on a projector, on a classmate's laptop, on your phone.</p>
+        <p>They see each stroke as you draw it and follow you through the pages. They can look, not edit, and nothing is stored online.</p>
+      </div>
+      <form class="watch" id="watch" action="live/" autocomplete="off">
+        <label for="code">Code from the tablet</label>
+        <div class="row">
+          <input id="code" name="code" maxlength="5" placeholder="ABCDE" spellcheck="false" autocapitalize="characters" inputmode="text" aria-describedby="code-help">
+          <button type="submit" disabled>Watch</button>
+        </div>
+        <span id="code-help" class="small">Five letters, shown under Live in the app.</span>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="filesec paper" id="file" aria-labelledby="file-h">
+  <div class="wrap">
+    <h2 id="file-h">Just a file</h2>
+    <div class="filegrid">
+      <div>
+        <p>Every note is an ordinary .excalidraw file. No account, no cloud, nothing to export.</p>
+        <ul>
+          <li>Open it at excalidraw.com, strokes and all</li>
+          <li>Keep it in your Obsidian vault: the <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw-obsidian.zip">Obsidian plugin</a> shows notes with their PDF pages, and tapping one opens it in the app</li>
+          <li>Version it with git, diff it, script it</li>
+          <li>Open any .excalidraw file from a file manager and edit it in place</li>
+        </ul>
+      </div>
+<pre aria-label="Example of a note file"><span class="c">// Lecture 3.excalidraw</span>
+{
+  <span class="k">"type"</span>: <span class="s">"excalidraw"</span>,
+  <span class="k">"elements"</span>: [
+    { <span class="k">"type"</span>: <span class="s">"frame"</span>,
+      <span class="k">"name"</span>: <span class="s">"Page 4"</span>,
+      <span class="k">"customData"</span>: { <span class="k">"background"</span>: {
+        <span class="k">"kind"</span>: <span class="s">"pdf"</span>,
+        <span class="k">"file"</span>: <span class="s">"Lecture 3.pdf"</span>,
+        <span class="k">"page"</span>: 3 } } },
+    { <span class="k">"type"</span>: <span class="s">"freedraw"</span>,
+      <span class="k">"strokeColor"</span>: <span class="s">"#e03131"</span>,
+      <span class="k">"points"</span>: [[0, 0], [4.2, 1.9], …],
+      <span class="k">"pressures"</span>: [0.31, 0.44, …] }
+  ],
+  <span class="k">"inkcalidraw"</span>: { <span class="k">"pens"</span>: { … } }
+}</pre>
+    </div>
+  </div>
+</section>
+
+<div class="tiles" aria-hidden="true"></div>
+
+<footer>
+  <div class="wrap">
+    <span class="mark">inkcalidraw</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw.apk">Download for Android</a>
+      <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw-obsidian.zip">Obsidian plugin</a>
+      <a href="live/">Live viewer</a>
+      <a href="https://github.com/fabsch225/inkcalidraw">Source on GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  // Watch form: five letters -> live/#CODE
+  const form = document.getElementById("watch"), input = document.getElementById("code"), go = form.querySelector("button");
+  input.addEventListener("input", () => {
+    input.value = input.value.replace(/[^a-z]/gi, "").slice(0, 5).toUpperCase();
+    go.disabled = input.value.length !== 5;
+  });
+  form.addEventListener("submit", (e) => { e.preventDefault(); if (input.value.length === 5) location.href = "live/#" + input.value; });
+</script>
+</body>
+</html>

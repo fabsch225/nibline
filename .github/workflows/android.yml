@@ -169,3 +169,30 @@ jobs:
             device-screens/
             relay.log
           if-no-files-found: ignore
+
+  release:
+    # Keeps a "latest" GitHub release with the newest APK and Obsidian plugin (the homepage links to these files).
+    needs: [build, obsidian-plugin]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: inkcalidraw-apk-${{ github.run_number }}
+          path: apk
+      - uses: actions/download-artifact@v5
+        with:
+          name: inkcalidraw-obsidian-${{ github.run_number }}
+          path: plugin
+      - name: Update the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp apk/*.apk inkcalidraw.apk
+          (cd plugin && zip -q ../inkcalidraw-obsidian.zip main.js manifest.json styles.css)
+          notes="Newest build from main (${GITHUB_SHA::7}). Install inkcalidraw.apk on the tablet; unzip inkcalidraw-obsidian.zip into <vault>/.obsidian/plugins/inkcalidraw/."
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest inkcalidraw.apk inkcalidraw-obsidian.zip --target "$GITHUB_SHA" --title "Latest build" --notes "$notes" --latest

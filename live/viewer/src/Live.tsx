@@ -128,28 +128,30 @@ export function Live({ code, relay }: { code: string; relay: string }) {
   useEffect(() => { if (follow) (window as unknown as { __live?: { applyView(): void } }).__live?.applyView(); }, [follow]);
 
   const label = status === "live" ? "Live" : status === "offline" ? "Tablet offline" : "Connecting…";
-  const dot = status === "live" ? "#2f9e44" : status === "offline" ? "#868e96" : "#f08c00";
+  const dot = status === "live" ? "#2f9e44" : status === "offline" ? "#9a9aa3" : "#ee4b2b";
   return (
     <div className="live" style={{ height: "100%", position: "relative" }}>
       <style>{`
         .live .bar { position: absolute; z-index: 10; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-          display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border-radius: 999px; font-size: 14px; white-space: nowrap;
-          background: rgba(255,255,255,.92); box-shadow: 0 1px 6px rgba(0,0,0,.12); max-width: calc(100% - 32px); box-sizing: border-box; }
-        .live .bar .title { overflow: hidden; text-overflow: ellipsis; font-weight: 600; min-width: 0; }
-        .live .bar .code { font-family: ui-monospace, Menlo, monospace; opacity: .6; letter-spacing: .08em; }
-        .live .bar button { font: 500 13px system-ui; border: 0; border-radius: 999px; padding: 6px 10px; cursor: pointer; background: #ececf4; color: inherit; }
-        .live .bar button.on { background: #6965db; color: white; }
-        .live .hint { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 5; opacity: .6; font-size: 15px; padding: 16px; text-align: center; }
-        @media (prefers-color-scheme: dark) { .live .bar { background: rgba(35,35,41,.92); color: #e8e8ec; } .live .bar button { background: #34343e; } }
+          display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 6px 0 16px; border-radius: 999px; font-size: 15px; white-space: nowrap;
+          background: #fff; border: 2px solid #000; max-width: calc(100% - 32px); box-sizing: border-box; }
+        .live .bar .title { overflow: hidden; text-overflow: ellipsis; font-weight: 700; min-width: 0; }
+        .live .bar .state { opacity: .65; }
+        .live .bar .code { font: 500 13px "Martian Mono", ui-monospace, monospace; letter-spacing: .12em; opacity: .55; }
+        .live .bar button { font: 700 14px "Archivo", system-ui; border: 0; border-radius: 999px; height: 32px; padding: 0 14px; cursor: pointer; background: #ececf0; color: inherit; }
+        .live .bar button.on { background: #000; color: #fff; }
+        .live .bar button.x { width: 32px; padding: 0; font-size: 16px; }
+        .live .hint { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 5; font-size: 17px; padding: 16px; text-align: center; opacity: .7; }
+        @media (prefers-color-scheme: dark) { .live .bar { background: #000; border-color: #f2f2f4; color: #f2f2f4; } .live .bar button { background: #26262c; } .live .bar button.on { background: #f2f2f4; color: #000; } }
         .live .excalidraw .App-menu_top, .live .excalidraw .layer-ui__wrapper__footer-left { visibility: hidden; }
       `}</style>
       <div className="bar">
         <span style={{ width: 8, height: 8, borderRadius: 4, background: dot, flex: "none" }} />
         <span className="title">{note || label}</span>
-        {note && status !== "live" ? <span style={{ opacity: .6 }}>· {label}</span> : null}
+        {note && status !== "live" ? <span className="state">{label}</span> : null}
         <span className="code">{code}</span>
         <button className={follow ? "on" : ""} onClick={() => setFollow(!follow)} title="Keep showing what's on the tablet's screen">Follow</button>
-        <button onClick={() => { location.hash = ""; }} title="Watch another code">✕</button>
+        <button className="x" onClick={() => { location.hash = ""; }} title="Watch another code" aria-label="Watch another code">✕</button>
       </div>
       {empty && <div className="hint">{status === "live" ? "Open a note on the tablet." : "Waiting for the tablet… Start Live there with this code."}</div>}
       <div style={{ position: "absolute", inset: 0 }}

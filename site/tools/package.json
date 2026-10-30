@@ -1,0 +1,1 @@
+{ "private": true, "type": "module", "scripts": { "strokes": "node strokes.mjs" }, "dependencies": { "perfect-freehand": "1.2.0" } }

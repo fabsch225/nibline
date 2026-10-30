@@ -3,7 +3,7 @@ name: Live mirror (relay + viewer)
 on:
   push:
     branches: [main]
-    paths: ["live/**", ".github/workflows/live.yml", ".github/scripts/relay-url.sh"]
+    paths: ["live/**", "site/**", ".github/workflows/live.yml", ".github/scripts/relay-url.sh"]
   workflow_dispatch:
 
 concurrency:
@@ -58,6 +58,11 @@ jobs:
             echo "::warning::Add a CLOUDFLARE_API_TOKEN repository secret (template: Edit Cloudflare Workers) to deploy the relay and viewer."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Check the homepage is built from its source
+        run: |
+          cd site/tools && npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
+          node strokes.mjs > /dev/null && node build.mjs
+          git diff --exit-code -- ../index.html ../strokes.json || { echo "::error::Run node site/tools/strokes.mjs && node site/tools/build.mjs and commit site/index.html"; exit 1; }
       - name: Deploy the relay to Cloudflare
         id: relay
         if: steps.token.outputs.ok == 'true'
@@ -75,15 +80,18 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           VITE_RELAY_URL="${{ steps.relay.outputs.url }}" npm run build
-          touch dist/.nojekyll
-      - name: Publish the viewer to GitHub Pages (gh-pages branch)
+      - name: Publish homepage and viewer to GitHub Pages (gh-pages branch)
         if: steps.token.outputs.ok == 'true'
         run: |
-          cd live/viewer/dist
+          mkdir -p public
+          cp site/index.html site/favicon.svg public/ && cp -r site/fonts public/fonts
+          cp -r live/viewer/dist public/live
+          touch public/.nojekyll
+          cd public
           git init -q -b gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -qm "Viewer for ${GITHUB_SHA::7}"
+          git commit -qm "Site for ${GITHUB_SHA::7}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
-          echo "Viewer: https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/ (enable Pages from the gh-pages branch if it isn't live)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Site: https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/ (viewer at /live/; enable Pages from the gh-pages branch if it isn't live)" >> "$GITHUB_STEP_SUMMARY"

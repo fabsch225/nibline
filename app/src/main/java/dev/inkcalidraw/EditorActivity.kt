@@ -210,7 +210,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             setTextIsSelectable(true)
         }
         val status = TextView(this).apply { textSize = 15f; gravity = Gravity.CENTER; setPadding(0, ui.dpi(4), 0, ui.dpi(10)) }
-        val link = TextView(this).apply { textSize = 14f; gravity = Gravity.CENTER; setTextColor(Color.parseColor("#6965db")); setTextIsSelectable(true) }
+        val link = TextView(this).apply { textSize = 14f; gravity = Gravity.CENTER; setTextColor(ui.accent); setTextIsSelectable(true) }
         val help = TextView(this).apply {
             textSize = 13f; gravity = Gravity.CENTER; setPadding(0, ui.dpi(12), 0, 0); alpha = 0.7f; setTextColor(ui.text)
             text = "Anyone with this code can watch the note you have open (read-only). Nothing is stored online."

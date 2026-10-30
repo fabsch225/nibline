@@ -49,6 +49,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 try {
   // join screen first
   await page.goto(`http://127.0.0.1:${server.address().port}/?relay=http://127.0.0.1:8798`);
+  await page.waitForTimeout(400); await page.screenshot({ path: path.join(OUT, "0-join.png") });
   await page.getByLabel("Live code").fill("viewx");
   await page.getByRole("button", { name: "Watch" }).click();
   await page.waitForFunction(() => location.hash === "#VIEWX");
@@ -100,7 +101,7 @@ try {
 
   // tablet goes away / comes back and resends
   tablet.close();
-  await page.getByText("· Tablet offline").waitFor({ timeout: 5000 });
+  await page.locator(".bar .state", { hasText: "Tablet offline" }).waitFor({ timeout: 5000 });
   const t2 = new WebSocket("ws://127.0.0.1:8798/live/" + CODE + "?host=tablet-secret-0123456789abcdef");
   await new Promise((r) => t2.on("open", r));
   t2.send(JSON.stringify({ t: "full", note: "Week 4", appState: {}, elements: [stroke("n1", 100, "#2f9e44", "a0")] }));
