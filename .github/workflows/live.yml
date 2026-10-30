@@ -74,6 +74,10 @@ jobs:
           npx wrangler deploy
           for i in $(seq 1 20); do curl -fsS "$url/" && break; sleep 3; done
           echo "Relay: $url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Smoke-test the deployed relay (tablet and viewers over real WebSockets, throwaway code)
+        if: steps.token.outputs.ok == 'true'
+        working-directory: live/relay
+        run: RELAY_URL="${{ steps.relay.outputs.url }}" npm test
       - name: Build the viewer
         if: steps.token.outputs.ok == 'true'
         working-directory: live/viewer
