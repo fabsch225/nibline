@@ -105,6 +105,12 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private var lastMoveTime = 0L
     private var zoomedThisGesture = false
     private var animator: ValueAnimator? = null
+    /** After "Fit width": finger drags only move vertically (until a pinch or another fit). */
+    private var widthLocked = false
+    private var velocity: android.view.VelocityTracker? = null
+    private var fingerVy = 0f   // finger speed for scroll acceleration (px/s, smoothed)
+    private val fling by lazy { android.widget.OverScroller(this, DecelerateInterpolator(1.2f)) }
+    private var flingAnim: ValueAnimator? = null
 
     private val pickPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { insertPdf(it) } }
     private val exportPdf = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri -> uri?.let { writePdf(it) } }
@@ -172,7 +178,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         saveNow()
     }
 
-    override fun onDestroy() { Live.detach(this); Live.unlisten(liveListener); surface.release(); pdfs.close(); super.onDestroy() }
+    override fun onDestroy() { stopFling(); velocity?.recycle(); velocity = null; Live.detach(this); Live.unlisten(liveListener); surface.release(); pdfs.close(); super.onDestroy() }
 
     // =============================================================== live mirror
 
@@ -341,7 +347,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val idx = ev.actionIndex
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                animator?.cancel()
+                animator?.cancel(); stopFling()
                 val type = ev.getToolType(idx)
                 // With finger drawing on, a second finger turns a fresh finger stroke into navigation.
                 val drawIdx = if (drawPointer != -1) ev.findPointerIndex(drawPointer) else -1
@@ -708,6 +714,55 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun navFingers(ev: MotionEvent, exclude: Int = -1) =
         (0 until ev.pointerCount).filter { it != exclude && ev.getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
 
+    /** Scroll gain for a finger moving at [v] px/s (vertical). */
+    private fun scrollGain(v: Float): Float {
+        val speed = abs(v) / resources.displayMetrics.density // dp/s
+        return 1f + 1.5f * ((speed - 450f) / 1350f).coerceIn(0f, 1f)
+    }
+
+    private fun stopFling() {
+        flingAnim?.cancel(); flingAnim = null
+        fling.forceFinished(true)
+    }
+
+    /** Vertical scroll range (matrix translateY) that keeps some content on screen; null = nothing to scroll. */
+    private fun verticalRange(): Pair<Int, Int>? {
+        val s = scale()
+        val (top, bottom) = if (meta.paged) {
+            val pages = Pages.pages(scene).ifEmpty { return null }
+            pages.minOf { it.y } to pages.maxOf { it.y + it.h }
+        } else {
+            val b = Geometry.contentBounds(scene.elements) ?: return null
+            b.minY - surface.height / s to b.maxY + surface.height / s * 0.5
+        }
+        val margin = ui.dp(16)
+        val maxTy = margin - top.toFloat() * s                          // first page's top at the top of the screen
+        val minTy = surface.height - margin - bottom.toFloat() * s      // last page's bottom at the bottom
+        if (minTy >= maxTy) return null
+        return minTy.toInt() to maxTy.toInt()
+    }
+
+    /** Keeps scrolling after a fast vertical swipe, slowing down; stops at the first/last page or on touch. */
+    private fun startFling(vy: Float) {
+        val range = verticalRange() ?: return
+        val v = FloatArray(9).also { view.getValues(it) }
+        val ty = v[Matrix.MTRANS_Y].toInt()
+        if (ty < range.first || ty > range.second) return
+        stopFling()
+        fling.fling(0, ty, 0, vy.toInt(), 0, 0, range.first, range.second)
+        var last = ty
+        flingAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 4000; repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                if (!fling.computeScrollOffset()) { stopFling(); return@addUpdateListener }
+                val y = fling.currY
+                view.postTranslate(0f, (y - last).toFloat()); last = y
+                redraw()
+            }
+            start()
+        }
+    }
+
     private fun resetFingers(ev: MotionEvent, exclude: Int = -1) {
         val f = navFingers(ev, exclude)
         lastFingerCount = f.size
@@ -716,7 +771,11 @@ class EditorActivity : ComponentActivity(), Live.Source {
         lastFocusY = f.map { ev.getY(it) }.average().toFloat()
         lastSpan = span(ev, f, lastFocusX, lastFocusY)
         lastMoveTime = SystemClock.uptimeMillis()
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) { zoomedThisGesture = false; fingerVx = 0f }
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            zoomedThisGesture = false; fingerVx = 0f; fingerVy = 0f
+            velocity?.recycle(); velocity = android.view.VelocityTracker.obtain()
+        }
+        velocity?.addMovement(ev)
     }
 
     private fun span(ev: MotionEvent, f: List<Int>, cx: Float, cy: Float) =
@@ -725,6 +784,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun fingerMove(ev: MotionEvent) {
         val f = navFingers(ev)
         if (f.isEmpty()) return
+        (velocity ?: android.view.VelocityTracker.obtain().also { velocity = it }).addMovement(ev)
         if (f.size != lastFingerCount) { resetFingers(ev); return }
         // Palm rejection: a hand resting while the pen hovers shouldn't scroll the page.
         if (SystemClock.uptimeMillis() - lastPenNear < 400) { lastFocusX = f.map { ev.getX(it) }.average().toFloat(); lastFocusY = f.map { ev.getY(it) }.average().toFloat(); return }
@@ -736,12 +796,17 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val now = SystemClock.uptimeMillis()
         val dt = (now - lastMoveTime).coerceAtLeast(1)
         fingerVx = 0.7f * fingerVx + 0.3f * ((fx - lastFocusX) * 1000f / dt)
+        fingerVy = 0.6f * fingerVy + 0.4f * ((fy - lastFocusY) * 1000f / dt)
         lastMoveTime = now
-        view.postTranslate(fx - lastFocusX, fy - lastFocusY)
+        // Vertical acceleration: 1:1 when moving slowly (precise), up to 2.5x for fast swipes. Horizontal stays 1:1,
+        // and is off entirely while the width is locked ("Fit width").
+        val dy = (fy - lastFocusY) * (if (f.size == 1) scrollGain(fingerVy) else 1f) // pinching: keep content under the fingers
+        val dx = if (widthLocked) 0f else fx - lastFocusX
+        view.postTranslate(dx, dy)
         if (f.size >= 2 && lastSpan > 0f && s > 0f) {
             val cur = scale()
             val k = (cur * (s / lastSpan)).coerceIn(0.05f, 30f) / cur
-            if (abs(k - 1f) > 0.002f) zoomedThisGesture = true
+            if (abs(k - 1f) > 0.002f) { zoomedThisGesture = true; widthLocked = false }
             view.postScale(k, k, fx, fy)
         }
         lastFocusX = fx; lastFocusY = fy; lastSpan = s
@@ -759,6 +824,13 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun fingersReleased() {
         lastFingerCount = 0
+        // vertical momentum (not after pinching, not while "release to add a page" is showing)
+        val vt = velocity; velocity = null
+        var vy = 0f
+        if (vt != null) { vt.computeCurrentVelocity(1000, 30000f); vy = vt.yVelocity; vt.recycle() }
+        val flingUp = !zoomedThisGesture && hint == null && abs(vy) > 900 * resources.displayMetrics.density &&
+            (!meta.paged || meta.direction == PageDirection.VERTICAL || abs(vy) > abs(fingerVx) * 1.5f)
+        if (flingUp) startFling(vy * scrollGain(vy))
         if (!meta.paged) { hint = null; redraw(); return }
         if (hint != null) {
             hint = null
@@ -766,7 +838,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             return
         }
         // Horizontal page mode: swipe/snap page by page, like Samsung Notes. Skip when zoomed into a page.
-        if (meta.direction == PageDirection.HORIZONTAL && !zoomedThisGesture) {
+        if (meta.direction == PageDirection.HORIZONTAL && !zoomedThisGesture && !flingUp) {
             val pages = Pages.pages(scene)
             if (pages.isEmpty()) return
             val cur = currentPageIndex()
@@ -813,6 +885,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     }
 
     private fun goToPage(i: Int, keepScale: Boolean) {
+        if (!keepScale) widthLocked = false
         val pages = Pages.pages(scene)
         val p = pages.getOrNull(i) ?: return
         val vw = surface.width.toFloat(); val vh = surface.height.toFloat()
@@ -826,7 +899,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         animateTo(m)
     }
 
-    private fun fitPage() { goToPage(currentPageIndex(), keepScale = false) }
+    private fun fitPage() { widthLocked = false; goToPage(currentPageIndex(), keepScale = false) }
 
     private fun fitWidth() {
         val p = Pages.pages(scene).getOrNull(currentPageIndex()) ?: return
@@ -834,10 +907,12 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val s = vw / p.w.toFloat()
         val centerWorldY = toWorld(0f, surface.height / 2f)[1]
         val m = Matrix().apply { setScale(s, s); postTranslate((vw - p.w.toFloat() * s) / 2 - p.x.toFloat() * s, surface.height / 2f - centerWorldY * s) }
+        widthLocked = true
         animateTo(m)
     }
 
     private fun fitContent() {
+        widthLocked = false
         val b = Geometry.contentBounds(scene.elements)
         val m = Matrix()
         if (b != null && surface.width > 0) {
@@ -1284,7 +1359,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             setOnMenuItemClickListener {
                 when (it.title.toString()) {
                     "Fit page" -> fitPage(); "Fit width" -> fitWidth(); "Fit drawing" -> fitContent()
-                    "Zoom 100%" -> { val c = toWorld(surface.width / 2f, surface.height / 2f); animateTo(Matrix().apply { setTranslate(surface.width / 2f - c[0], surface.height / 2f - c[1]) }) }
+                    "Zoom 100%" -> { widthLocked = false; val c = toWorld(surface.width / 2f, surface.height / 2f); animateTo(Matrix().apply { setTranslate(surface.width / 2f - c[0], surface.height / 2f - c[1]) }) }
                 }
                 true
             }

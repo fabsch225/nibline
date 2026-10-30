@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
@@ -644,6 +645,57 @@ class EditorDeviceTest {
             assertTrue("$brush: pressure doesn't show (light $light vs firm $firm)", firm > light * 1.35 && light > 5)
             s.close()
         }
+    }
+
+    /** Fit width locks horizontal dragging; vertical drags accelerate when fast and keep gliding after a flick. */
+    @Test fun fitWidthLocksHorizontalAndFastSwipesGoFurther() {
+        val sc = Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL)
+        repeat(7) { Pages.addPage(sc, PageOrientation.PORTRAIT, PageDirection.VERTICAL) }
+        val s = launch(note(sc.toJson(), "navigation"))
+        fun call(name: String) = s.onActivity { EditorActivity::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(it) }
+        fun m(): FloatArray { val v = FloatArray(9); s.onActivity { field<android.graphics.Matrix>(it, "view").getValues(v) }; return v }
+        val r = surfaceRect(s)
+        fun drag(dx: Float, dy: Float, steps: Int, stepMs: Long) =
+            gesture((0..steps).map { i -> floatArrayOf(r.exactCenterX() - dx / 2 + dx * i / steps, r.exactCenterY() - dy / 2 + dy * i / steps, 0.5f) }, tool = MotionEvent.TOOL_TYPE_FINGER, stepMs = stepMs)
+
+        call("fitWidth"); SystemClock.sleep(700)
+        val a = m()
+        drag(300f, -200f, 60, 14) // slow diagonal drag
+        SystemClock.sleep(500)
+        val b = m()
+        val slowDy = b[Matrix.MTRANS_Y] - a[Matrix.MTRANS_Y]
+        log("navigation: fit width, slow diagonal drag (300, -200): moved x=${b[Matrix.MTRANS_X] - a[Matrix.MTRANS_X]} y=$slowDy")
+        assertEquals("no horizontal movement under fit width", a[Matrix.MTRANS_X], b[Matrix.MTRANS_X], 1f)
+        assertEquals("scale unchanged", a[Matrix.MSCALE_X], b[Matrix.MSCALE_X], 0.001f)
+        assertTrue("slow drags stay close to 1:1 ($slowDy)", slowDy < -170f && slowDy > -280f)
+
+        val c = m()
+        drag(0f, -420f, 10, 5) // fast flick up
+        val atLift = m()
+        SystemClock.sleep(1200)
+        val d = m()
+        val dragged = atLift[Matrix.MTRANS_Y] - c[Matrix.MTRANS_Y]
+        val glided = d[Matrix.MTRANS_Y] - atLift[Matrix.MTRANS_Y]
+        log("navigation: fast flick of 420px moved ${-dragged} px while dragging, then glided ${-glided} px")
+        assertTrue("fast drags go further than the finger (${-dragged})", -dragged > 420 * 1.4f)
+        assertTrue("keeps gliding after a fast flick (${-glided})", -glided > 150f)
+        assertEquals("still no horizontal movement", a[Matrix.MTRANS_X], d[Matrix.MTRANS_X], 1f)
+
+        // gliding stops at the last page instead of running off (and doesn't add pages)
+        repeat(6) { drag(0f, -500f, 8, 4); SystemClock.sleep(150) }
+        SystemClock.sleep(2500)
+        var pages = 0; s.onActivity { pages = Pages.pages(field<ExcalidrawScene>(it, "scene")).size }
+        assertEquals("no page added by flicking", 8, pages)
+
+        // Fit page releases the lock
+        call("fitPage"); SystemClock.sleep(700)
+        val e = m()
+        drag(250f, 0f, 40, 14)
+        SystemClock.sleep(400)
+        val f2 = m()
+        assertTrue("horizontal dragging works again after Fit page", kotlin.math.abs(f2[Matrix.MTRANS_X] - e[Matrix.MTRANS_X]) > 150f)
+        shot("28-navigation")
+        s.close()
     }
 
     /** Overview screenshots of the toolbar and its submenus. */
