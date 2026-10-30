@@ -9,3 +9,4 @@ fixtures/
 tools/compat/node_modules/
 tools/compat/verify.bundle.js
 out/
+.kotlin/
