@@ -108,7 +108,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
     /** After "Fit width": finger drags only move vertically (until a pinch or another fit). */
     private var widthLocked = false
     private var velocity: android.view.VelocityTracker? = null
-    private var fingerVy = 0f   // finger speed for scroll acceleration (px/s, smoothed)
+    private var fingerVy = 0f   // finger speed for scroll acceleration (px/s)
+    @Volatile var lastReleaseVelocity = 0f; private set // for tests
     private val fling by lazy { android.widget.OverScroller(this, DecelerateInterpolator(1.2f)) }
     private var flingAnim: ValueAnimator? = null
 
@@ -796,7 +797,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val now = SystemClock.uptimeMillis()
         val dt = (now - lastMoveTime).coerceAtLeast(1)
         fingerVx = 0.7f * fingerVx + 0.3f * ((fx - lastFocusX) * 1000f / dt)
-        fingerVy = 0.6f * fingerVy + 0.4f * ((fy - lastFocusY) * 1000f / dt)
+        // finger speed from the events' own timestamps (touch moves arrive batched, so handling time is unreliable)
+        velocity?.let { vt -> vt.computeCurrentVelocity(1000, 30000f); fingerVy = f.map { vt.getYVelocity(ev.getPointerId(it)) }.average().toFloat() }
         lastMoveTime = now
         // Vertical acceleration: 1:1 when moving slowly (precise), up to 2.5x for fast swipes. Horizontal stays 1:1,
         // and is off entirely while the width is locked ("Fit width").
@@ -827,7 +829,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
         // vertical momentum (not after pinching, not while "release to add a page" is showing)
         val vt = velocity; velocity = null
         var vy = 0f
-        if (vt != null) { vt.computeCurrentVelocity(1000, 30000f); vy = vt.yVelocity; vt.recycle() }
+        if (vt != null) { vt.computeCurrentVelocity(1000, 30000f); vy = if (abs(fingerVy) > abs(vt.yVelocity)) fingerVy else vt.yVelocity; vt.recycle() }
+        lastReleaseVelocity = vy
         val flingUp = !zoomedThisGesture && hint == null && abs(vy) > 900 * resources.displayMetrics.density &&
             (!meta.paged || meta.direction == PageDirection.VERTICAL || abs(vy) > abs(fingerVx) * 1.5f)
         if (flingUp) startFling(vy * scrollGain(vy))

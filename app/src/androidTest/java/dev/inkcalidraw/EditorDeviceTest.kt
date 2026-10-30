@@ -676,7 +676,8 @@ class EditorDeviceTest {
         val d = m()
         val dragged = atLift[Matrix.MTRANS_Y] - c[Matrix.MTRANS_Y]
         val glided = d[Matrix.MTRANS_Y] - atLift[Matrix.MTRANS_Y]
-        log("navigation: fast flick of 420px moved ${-dragged} px while dragging, then glided ${-glided} px")
+        var rv = 0f; s.onActivity { rv = it.lastReleaseVelocity }
+        log("navigation: fast flick of 420px moved ${-dragged} px while dragging, then glided ${-glided} px (release velocity $rv px/s, density ${ctx.resources.displayMetrics.density})")
         assertTrue("fast drags go further than the finger (${-dragged})", -dragged > 420 * 1.4f)
         assertTrue("keeps gliding after a fast flick (${-glided})", -glided > 150f)
         assertEquals("still no horizontal movement", a[Matrix.MTRANS_X], d[Matrix.MTRANS_X], 1f)

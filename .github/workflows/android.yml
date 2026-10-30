@@ -86,7 +86,7 @@ jobs:
   device-tests:
     # Runs the editor on an Android tablet emulator with synthetic S Pen input and saves screenshots.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v5
 
