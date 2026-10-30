@@ -1,4 +1,4 @@
-# Inkcalidraw (prototype)
+# Nibline (prototype)
 
 Native Android stylus note app (built for a Galaxy Tab S9 + S Pen) whose notes are plain `.excalidraw` files.
 

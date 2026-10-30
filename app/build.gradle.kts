@@ -15,7 +15,7 @@ android {
         versionName = "0.2-prototype." + (System.getenv("GITHUB_RUN_NUMBER") ?: "local")
         // Live mirror: relay (Cloudflare worker) and viewer page; CI fills these in, the app can also override the relay.
         val liveRelay = System.getenv("LIVE_RELAY") ?: (project.findProperty("liveRelay") as String?) ?: ""
-        val livePage = System.getenv("LIVE_PAGE") ?: (project.findProperty("livePage") as String?) ?: "https://fabsch225.github.io/inkcalidraw/live/"
+        val livePage = System.getenv("LIVE_PAGE") ?: (project.findProperty("livePage") as String?) ?: "https://fabsch225.github.io/inkcalidraw/live/" // CI sets LIVE_PAGE from the repository name
         buildConfigField("String", "LIVE_RELAY", "\"$liveRelay\"")
         buildConfigField("String", "LIVE_PAGE", "\"$livePage\"")
     }

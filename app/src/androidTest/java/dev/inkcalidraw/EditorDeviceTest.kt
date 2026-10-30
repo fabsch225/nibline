@@ -408,6 +408,10 @@ class EditorDeviceTest {
         val link = Uri.parse("inkcalidraw://open?vault=Uni&path=" + Uri.encode("Lectures/Week 3.excalidraw") + "&abs=" + Uri.encode("/storage/emulated/0/Documents/Uni"))
         val view = Intent(Intent.ACTION_VIEW, link).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         assertTrue("link handled by the app", ctx.packageManager.queryIntentActivities(view, 0).any { it.activityInfo.name == OpenLinkActivity::class.java.name })
+        // the new scheme (nibline://) works too; the old one (above) stays for older Obsidian plugins
+        val nib = Intent(Intent.ACTION_VIEW, Uri.parse(link.toString().replaceFirst("inkcalidraw://", "nibline://"))).addCategory(Intent.CATEGORY_BROWSABLE)
+        assertTrue("nibline:// handled", ctx.packageManager.queryIntentActivities(nib, 0).any { it.activityInfo.name == OpenLinkActivity::class.java.name })
+        assertNotNull(VaultLink.parse(nib.data))
 
         ctx.startActivity(view)
         assertNotNull("asks for the vault folder", device.wait(Until.findObject(By.textContains("Allow access")), 8000))

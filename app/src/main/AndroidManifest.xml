@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Live mirror (streams the open note to the relay while Live is on) -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="Inkcalidraw" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:hardwareAccelerated="true">
+    <application android:label="Nibline" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:hardwareAccelerated="true">
         <activity android:name=".NotesActivity" android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density">
             <intent-filter>
@@ -10,13 +10,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- inkcalidraw://open?vault=…&path=…  (the Obsidian plugin's "Edit in Inkcalidraw app") -->
+        <!-- nibline://open?vault=…&path=…  (the Obsidian plugin's "Edit in Nibline app"; inkcalidraw:// from older plugins) -->
         <activity android:name=".OpenLinkActivity" android:exported="true" android:excludeFromRecents="true"
             android:noHistory="false" android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nibline" android:host="open" />
                 <data android:scheme="inkcalidraw" android:host="open" />
             </intent-filter>
         </activity>

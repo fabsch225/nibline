@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inkcalidraw: handwritten notes for Android tablets</title>
+<title>Nibline: handwritten notes for Android tablets</title>
 <meta name="description" content="Handwritten notes and PDF annotation for Android tablets, saved as plain Excalidraw files. With an Obsidian plugin and a live web mirror.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preload" href="fonts/archivo.woff2" as="font" type="font/woff2" crossorigin>
@@ -44,7 +44,7 @@
   .mark { font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; }
   h1 {
     margin: calc(var(--r) * 2) 0 0; font-weight: 900; font-stretch: 125%; letter-spacing: -0.055em;
-    font-size: min(12.6vw, 164px); line-height: calc(var(--r) * 5); white-space: nowrap;
+    font-size: min(20vw, 252px); line-height: calc(var(--r) * 7); white-space: nowrap;
   }
   .flourish { display: block; width: min(100%, 1180px); height: auto; margin: calc(var(--r) * -1.4) 0 0 -0.5%; overflow: visible; }
   .flourish .ink { fill: var(--ink); }
@@ -130,6 +130,7 @@
   footer a:hover { color: var(--white); text-decoration: underline; text-underline-offset: 4px; }
 
   @media (max-width: 860px) {
+    h1 { margin-top: var(--r); line-height: calc(var(--r) * 4); }
     .top nav a:not(:last-child) { display: none; }
     .lede { grid-template-columns: minmax(0, 1fr); }
     .features { grid-template-columns: minmax(0, 1fr); }
@@ -149,7 +150,7 @@
 <header class="hero paper">
   <div class="wrap">
     <div class="top">
-      <span class="mark">inkcalidraw</span>
+      <span class="mark">nibline</span>
       <nav aria-label="Main">
         <a href="#features">Features</a>
         <a href="#live">Live</a>
@@ -157,7 +158,7 @@
         <a href="https://github.com/fabsch225/inkcalidraw">GitHub</a>
       </nav>
     </div>
-    <h1>inkcalidraw</h1>
+    <h1>nibline</h1>
     <svg class="flourish" viewBox="0 0 {{flourish.w}} {{flourish.h}}" aria-hidden="true">
       <defs>
         <mask id="reveal" maskUnits="userSpaceOnUse" x="-40" y="-60" width="1640" height="260">
@@ -170,7 +171,7 @@
       <p>Handwritten notes and PDF annotation for Android tablets, saved as plain Excalidraw files.</p>
       <div>
         <div class="actions">
-          <a class="btn primary" href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw.apk">
+          <a class="btn primary" href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/nibline.apk">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>
             Download for Android
           </a>
@@ -277,7 +278,7 @@
         <p>Every note is an ordinary .excalidraw file. No account, no cloud, nothing to export.</p>
         <ul>
           <li>Open it at excalidraw.com, strokes and all</li>
-          <li>Keep it in your Obsidian vault: the <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw-obsidian.zip">Obsidian plugin</a> shows notes with their PDF pages, and tapping one opens it in the app</li>
+          <li>Keep it in your Obsidian vault: the <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/nibline-obsidian.zip">Obsidian plugin</a> shows notes with their PDF pages, and tapping one opens it in the app</li>
           <li>Version it with git, diff it, script it</li>
           <li>Open any .excalidraw file from a file manager and edit it in place</li>
         </ul>
@@ -307,10 +308,10 @@
 
 <footer>
   <div class="wrap">
-    <span class="mark">inkcalidraw</span>
+    <span class="mark">nibline</span>
     <nav aria-label="Footer">
-      <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw.apk">Download for Android</a>
-      <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/inkcalidraw-obsidian.zip">Obsidian plugin</a>
+      <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/nibline.apk">Download for Android</a>
+      <a href="https://github.com/fabsch225/inkcalidraw/releases/download/latest/nibline-obsidian.zip">Obsidian plugin</a>
       <a href="live/">Live viewer</a>
       <a href="https://github.com/fabsch225/inkcalidraw">Source on GitHub</a>
     </nav>

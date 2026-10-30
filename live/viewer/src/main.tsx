@@ -45,7 +45,7 @@ function Join({ initial }: { initial: string }) {
         }
       `}</style>
       <form onSubmit={(e) => { e.preventDefault(); if (ok) location.hash = v; }}>
-        <h1><a href="../">inkcalidraw</a></h1>
+        <h1><a href="../">nibline</a></h1>
         <p>Enter the five-letter code shown under Live on the tablet.</p>
         <input aria-label="Live code" autoFocus autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={5}
           placeholder="ABCDE" value={v} onChange={(e) => setV(e.target.value.replace(/[^A-Za-z]/g, "").slice(0, 5).toUpperCase())} />

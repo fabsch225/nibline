@@ -34,14 +34,14 @@ class OpenLinkActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val l = VaultLink.parse(intent?.data)
-        if (l == null) { Toast.makeText(this, "Inkcalidraw: unsupported link", Toast.LENGTH_SHORT).show(); finish(); return }
+        if (l == null) { Toast.makeText(this, "Nibline: unsupported link", Toast.LENGTH_SHORT).show(); finish(); return }
         link = l
         if (savedInstanceState != null) return // waiting for the folder picker
         val hit = VaultResolver.resolve(this, l, VaultResolver.grantedTrees(this))
         if (hit != null) { openEditor(hit); return }
         AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
             .setTitle("Allow access to “${l.vault}”")
-            .setMessage("To edit drawings from Obsidian in place, Inkcalidraw needs access to your vault folder. Pick the folder “${l.vault}” on the next screen. This is only asked once.")
+            .setMessage("To edit drawings from Obsidian in place, Nibline needs access to your vault folder. Pick the folder “${l.vault}” on the next screen. This is only asked once.")
             .setPositiveButton("Choose folder") { _, _ -> pickFolder.launch(VaultResolver.initialHint(l)) }
             .setNegativeButton("Cancel") { _, _ -> finish() }
             .setOnCancelListener { finish() }
@@ -63,7 +63,7 @@ class OpenLinkActivity : ComponentActivity() {
 data class VaultLink(val vault: String, val path: String, val abs: String?) {
     companion object {
         fun parse(u: Uri?): VaultLink? {
-            if (u == null || u.scheme != "inkcalidraw") return null
+            if (u == null || (u.scheme != "nibline" && u.scheme != "inkcalidraw")) return null
             val path = u.getQueryParameter("path")?.trim('/')?.takeIf { it.isNotEmpty() } ?: return null
             if (path.split('/').any { it == ".." }) return null
             val vault = u.getQueryParameter("vault") ?: ""

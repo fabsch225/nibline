@@ -89,6 +89,8 @@ jobs:
         run: |
           mkdir -p public
           cp site/index.html site/favicon.svg public/ && cp -r site/fonts public/fonts
+          # links point at this repository (so renaming the repo needs no code change)
+          sed -i "s#github.com/fabsch225/inkcalidraw#github.com/${GITHUB_REPOSITORY}#g" public/index.html
           cp -r live/viewer/dist public/live
           touch public/.nojekyll
           cd public

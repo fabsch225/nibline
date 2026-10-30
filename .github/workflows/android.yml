@@ -42,6 +42,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           export LIVE_RELAY=$(.github/scripts/relay-url.sh || true)
+          export LIVE_PAGE="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/live/"
           echo "Live relay built into the APK: ${LIVE_RELAY:-none}"
           ./gradlew --no-daemon assembleRelease
 
@@ -191,8 +192,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          cp apk/*.apk inkcalidraw.apk
-          (cd plugin && zip -q ../inkcalidraw-obsidian.zip main.js manifest.json styles.css)
-          notes="Newest build from main (${GITHUB_SHA::7}). Install inkcalidraw.apk on the tablet; unzip inkcalidraw-obsidian.zip into <vault>/.obsidian/plugins/inkcalidraw/."
+          cp apk/*.apk nibline.apk
+          (cd plugin && zip -q ../nibline-obsidian.zip main.js manifest.json styles.css)
+          notes="Newest build from main (${GITHUB_SHA::7}). Install nibline.apk on the tablet; unzip nibline-obsidian.zip into <vault>/.obsidian/plugins/inkcalidraw/."
           gh release delete latest --cleanup-tag --yes || true
-          gh release create latest inkcalidraw.apk inkcalidraw-obsidian.zip --target "$GITHUB_SHA" --title "Latest build" --notes "$notes" --latest
+          gh release create latest nibline.apk nibline-obsidian.zip --target "$GITHUB_SHA" --title "Latest build" --notes "$notes" --latest

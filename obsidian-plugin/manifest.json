@@ -1,9 +1,9 @@
 {
   "id": "inkcalidraw",
-  "name": "Inkcalidraw",
+  "name": "Nibline",
   "version": "1.2.0",
   "minAppVersion": "1.5.0",
-  "description": "Open .excalidraw notes from the Inkcalidraw tablet app, with annotated PDF pages shown under your ink.",
+  "description": "Open .excalidraw notes from the Nibline tablet app, with annotated PDF pages shown under your ink.",
   "author": "Fabian Schuller",
   "isDesktopOnly": false
 }

@@ -1,7 +1,7 @@
 /**
  * The editor itself, independent of Obsidian (so it can be tested in a plain browser).
  *
- * Inkcalidraw notes are ordinary .excalidraw files. Two app-specific things are handled here:
+ * Nibline notes are ordinary .excalidraw files. Two app-specific things are handled here:
  *  - Page frames whose customData.background = {kind: "pdf", file, page} show that page of a PDF that sits
  *    next to the note. The page is rendered with pdf.js into a locked image *under* the frame. These images
  *    are marked customData.ephemeral and are never written back to the file.
@@ -86,7 +86,7 @@ export function InkScene({ text, host }: { text: string; host: SceneHost }) {
   useEffect(() => {
     if (!api || !host.loadFiles) return;
     host.loadFiles().then((fs) => { if (fs.length) api.addFiles(fs.map((f) => ({ ...f, created: Date.now() })) as never); })
-      .catch((e) => console.warn("Inkcalidraw: images", e));
+      .catch((e) => console.warn("Nibline: images", e));
   }, [api]);
 
   // Paged notes open with the first page fitted to the view (like the tablet app's "fit page")
@@ -146,7 +146,7 @@ export function InkScene({ text, host }: { text: string; host: SceneHost }) {
       const ids = new Set(cur.map((e) => e.id));
       // backgrounds go to the bottom of the z-order
       api.updateScene({ elements: [...add.filter((e) => !ids.has(e.id)), ...cur] as never, captureUpdate: CaptureUpdateAction.NEVER });
-    })().catch((e) => console.warn("Inkcalidraw: PDF pages", e));
+    })().catch((e) => console.warn("Nibline: PDF pages", e));
     return () => { cancelled = true; };
   }, [api]);
 

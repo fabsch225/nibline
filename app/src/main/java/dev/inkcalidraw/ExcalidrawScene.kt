@@ -194,7 +194,7 @@ class ExcalidrawScene(
     fun lastIndex(): String? = elements.mapNotNull { it.index }.maxOrNull()
 
     companion object {
-        const val SOURCE = "https://github.com/inkcalidraw (android prototype)"
+        const val SOURCE = "Nibline for Android"
         const val APP_KEY = "inkcalidraw"
         private val json = Json { prettyPrint = false }
 

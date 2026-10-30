@@ -289,7 +289,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     /** The relay address is built in; this lets you point the app at another one (long-press the link). */
     private fun askRelayUrl(then: () -> Unit) {
-        val input = android.widget.EditText(this).apply { setText(Live.relayUrl(this@EditorActivity)); hint = "https://inkcalidraw-live.<you>.workers.dev" }
+        val input = android.widget.EditText(this).apply { setText(Live.relayUrl(this@EditorActivity)); hint = "https://<relay>.workers.dev" }
         android.app.AlertDialog.Builder(this).setTitle("Live relay address").setView(input)
             .setPositiveButton("Save") { _, _ -> Live.setRelayUrl(this, input.text.toString()); then() }
             .setNegativeButton("Cancel", null).show()

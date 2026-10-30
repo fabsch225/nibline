@@ -96,8 +96,8 @@ const r = await page.evaluate(async ({ code, note, png }) => {
   const menuFor = (f) => { const items = []; const menu = { addItem: (fn) => { const i = { setTitle: (t) => (items.push(t), i), setIcon: () => i, onClick: () => i, setSection: () => i }; fn(i); return menu; } };
     for (const h of log.handlers["file-menu"]) h(menu, f, "file-explorer-context-menu"); return items; };
   const menu = { md: menuFor(files["Drawing 1.excalidraw.md"]), plain: menuFor(files["Lectures/Week 3.excalidraw"]), note: menuFor(files["notes.md"]) };
-  // "Edit in Inkcalidraw app" sends the vault file to the tablet app
-  let edit; { const menu2 = { addItem: (fn) => { const i = { setTitle: (t) => (i.t = t, i), setIcon: () => i, setSection: () => i, onClick: (f) => { if (i.t === "Edit in Inkcalidraw app") edit = f; return i; } }; fn(i); return menu2; } };
+  // "Edit in Nibline app" sends the vault file to the tablet app
+  let edit; { const menu2 = { addItem: (fn) => { const i = { setTitle: (t) => (i.t = t, i), setIcon: () => i, setSection: () => i, onClick: (f) => { if (i.t === "Edit in Nibline app") edit = f; return i; } }; fn(i); return menu2; } };
     for (const h of log.handlers["file-menu"]) h(menu2, files["Lectures/Week 3.excalidraw"]); }
   edit();
   const menuLink = window.__opened.pop();
@@ -126,13 +126,13 @@ const r = await page.evaluate(async ({ code, note, png }) => {
 }, { code: dist("main.js"), note, png });
 console.log(JSON.stringify(r));
 assert.ok(r.extensions.includes("excalidraw"), ".excalidraw claimed");
-assert.deepEqual(r.menu.md, ["Open in Inkcalidraw viewer"], "viewer only for .excalidraw.md (the app edits .excalidraw)");
-assert.deepEqual(r.menu.plain, ["Edit in Inkcalidraw app", "Open in Inkcalidraw viewer"], "file menu entries for .excalidraw");
-const expected = "inkcalidraw://open?vault=Uni&path=Lectures%2FWeek%203.excalidraw&abs=%2Fstorage%2Femulated%2F0%2FDocuments%2FUni";
+assert.deepEqual(r.menu.md, ["Open in Nibline viewer"], "viewer only for .excalidraw.md (the app edits .excalidraw)");
+assert.deepEqual(r.menu.plain, ["Edit in Nibline app", "Open in Nibline viewer"], "file menu entries for .excalidraw");
+const expected = "nibline://open?vault=Uni&path=Lectures%2FWeek%203.excalidraw&abs=%2Fstorage%2Femulated%2F0%2FDocuments%2FUni";
 assert.equal(r.menuLink, expected, "app link from the file menu");
 assert.equal(r.atStartup, 0, "files restored at startup don't launch the app");
 assert.equal(r.tapLink, expected, "tapping a drawing launches the app");
-console.log("• Android: “Edit in Inkcalidraw app” and tapping a drawing open " + expected);
+console.log("• Android: “Edit in Nibline app” and tapping a drawing open " + expected);
 assert.deepEqual(r.menu.note, [], "no entry for ordinary notes");
 assert.equal(r.cmd, true, "command available for the open drawing");
 assert.equal(r.viewStates[0]?.type, "inkcalidraw-view", "opening a drawing switches to Inkcalidraw");
