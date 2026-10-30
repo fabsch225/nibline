@@ -143,9 +143,15 @@ class EditorDeviceTest {
         val box = Rect(pts.minOf { it[0] }.toInt() - 30, pts.minOf { it[1] }.toInt() - 30, pts.maxOf { it[0] }.toInt() + 30, pts.maxOf { it[1] }.toInt() + 30)
         // On a freshly booted emulator the first screenshots can show a stale frame: retry until the ink is in it.
         fun inkIn(b: Bitmap): Int { var n = 0; for (y in box.top until box.bottom step 3) for (x in box.left until box.right step 3) if (Color.red(b.getPixel(x, y)) < 200) n++; return n }
+        // ...and until two screenshots in a row agree, so a half-updated frame isn't compared.
         fun shotWithInk(name: String, nudge: () -> Unit = {}): Bitmap {
-            var b = shot(name)
-            for (i in 0 until 10) { if (inkIn(b) > 60) break; nudge(); SystemClock.sleep(300); b = shot(name) }
+            var b = shot(name); var n = inkIn(b)
+            for (i in 0 until 12) {
+                nudge(); SystemClock.sleep(250)
+                val b2 = shot(name); val n2 = inkIn(b2)
+                if (n > 60 && n2 > 60 && kotlin.math.abs(n2 - n) <= maxOf(3, n / 50)) return b2
+                b = b2; n = n2
+            }
             return b
         }
         val down = gesture(pts, lift = false)
