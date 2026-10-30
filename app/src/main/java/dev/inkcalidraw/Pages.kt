@@ -56,12 +56,19 @@ object Pages {
         }
     }
 
+    /** Paper for a new page next to [p]: its pattern (blank/lined/grid/dotted); PDF pages give a blank page. */
+    fun paperLike(scene: ExcalidrawScene, p: Page?): String {
+        val kind = p?.let { pg -> scene.elements.firstOrNull { it.id == pg.id }?.backgroundKind } ?: return "blank"
+        return if (kind == "pdf") "blank" else kind
+    }
+
     /** Appends a page; returns the new frame element. */
     fun addPage(
         scene: ExcalidrawScene, orientation: PageOrientation, dir: PageDirection, w: Double? = null, h: Double? = null,
-        pdfFile: String? = null, pdfPage: Int? = null, paper: String = "blank",
+        pdfFile: String? = null, pdfPage: Int? = null, paper: String? = null,
     ): Element {
         val existing = pages(scene)
+        val paper = paper ?: paperLike(scene, existing.lastOrNull()) // a new page keeps the previous page's pattern
         val (dw, dh) = size(orientation)
         val pw = w ?: dw; val ph = h ?: dh
         // First page of a note that already has whiteboard content: put the pages next to it, not on top.
@@ -77,10 +84,11 @@ object Pages {
      * Inserts a blank page so that it becomes page [position] (1-based; size+1 = at the end).
      * Size/orientation default to the neighbouring page, so inserting into a PDF matches its pages.
      */
-    fun insertPage(scene: ExcalidrawScene, position: Int, dir: PageDirection, orientation: PageOrientation? = null, paper: String = "blank"): Element {
+    fun insertPage(scene: ExcalidrawScene, position: Int, dir: PageDirection, orientation: PageOrientation? = null, paper: String? = null): Element {
         val ps = pages(scene)
         val pos = position.coerceIn(1, ps.size + 1)
         val neighbour = ps.getOrNull(pos - 1) ?: ps.getOrNull(pos - 2)
+        val paper = paper ?: paperLike(scene, ps.getOrNull(pos - 2) ?: neighbour)
         val (w, h) = when {
             orientation != null -> size(orientation)
             neighbour != null -> neighbour.w to neighbour.h

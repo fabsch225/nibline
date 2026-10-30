@@ -50,8 +50,11 @@ object Palette {
 class ColorHistory(ctx: Context) {
     private val prefs = ctx.getSharedPreferences("colors", 0)
     fun list(): List<String> = prefs.getString("recent", null)?.split(',')?.filter { it.startsWith("#") } ?: listOf("#1e1e1e", "#e03131", "#1971c2")
+    /** Remembers a colour. Colours already in the history keep their place, so the quick colours don't jump around. */
     fun use(c: String) {
-        val l = (listOf(c.lowercase()) + list().filter { it.lowercase() != c.lowercase() }).take(16)
+        val cur = list()
+        if (cur.any { it.equals(c, ignoreCase = true) }) return
+        val l = (listOf(c.lowercase()) + cur).take(16)
         prefs.edit().putString("recent", l.joinToString(",")).apply()
     }
 }
