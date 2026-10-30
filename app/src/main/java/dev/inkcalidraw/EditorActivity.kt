@@ -764,7 +764,6 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val range = verticalRange()
         val v = FloatArray(9).also { view.getValues(it) }
         val ty = v[Matrix.MTRANS_Y].toInt()
-        android.util.Log.d("InkNav", "fling: vy=$vy ty=$ty range=$range")
         if (range == null || ty < range.first || ty > range.second) return
         stopFling()
         fling.fling(0, ty, 0, vy.toInt(), 0, 0, range.first, range.second)
@@ -773,7 +772,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val cb = object : android.view.Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 if (flingFrame !== this) return
-                if (!fling.computeScrollOffset()) { android.util.Log.d("InkNav", "fling done at ${fling.currY}"); flingFrame = null; return }
+                if (!fling.computeScrollOffset()) { flingFrame = null; return }
                 val y = fling.currY
                 view.postTranslate(0f, (y - last).toFloat()); last = y
                 redraw()
@@ -855,7 +854,6 @@ class EditorActivity : ComponentActivity(), Live.Source {
         if (vt != null) { vt.computeCurrentVelocity(1000, 30000f); vy = vt.yVelocity; vt.recycle() }
         val rv = recentVelocity()
         if (abs(rv) > abs(vy)) vy = rv
-        android.util.Log.d("InkNav", "release: tracker=${vt != null} vy=$vy recent=$rv fingerVy=$fingerVy zoomed=$zoomedThisGesture hint=$hint")
         lastReleaseVelocity = vy
         val flingUp = !zoomedThisGesture && hint == null && abs(vy) > 400 * resources.displayMetrics.density &&
             (!meta.paged || meta.direction == PageDirection.VERTICAL || abs(vy) > abs(fingerVx) * 1.5f)

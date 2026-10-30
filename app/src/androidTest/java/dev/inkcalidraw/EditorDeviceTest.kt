@@ -653,7 +653,10 @@ class EditorDeviceTest {
         repeat(7) { Pages.addPage(sc, PageOrientation.PORTRAIT, PageDirection.VERTICAL) }
         val s = launch(note(sc.toJson(), "navigation"))
         fun call(name: String) = s.onActivity { EditorActivity::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(it) }
-        fun m(): FloatArray { val v = FloatArray(9); s.onActivity { field<android.graphics.Matrix>(it, "view").getValues(v) }; return v }
+        // read the view matrix directly: onActivity waits for the main thread to go idle, which only happens once a glide ends
+        var act: EditorActivity? = null; s.onActivity { act = it }
+        val viewMatrix = field<android.graphics.Matrix>(act!!, "view")
+        fun m(): FloatArray { val v = FloatArray(9); viewMatrix.getValues(v); return v }
         val r = surfaceRect(s)
         fun drag(dx: Float, dy: Float, steps: Int, stepMs: Long) =
             gesture((0..steps).map { i -> floatArrayOf(r.exactCenterX() - dx / 2 + dx * i / steps, r.exactCenterY() - dy / 2 + dy * i / steps, 0.5f) }, tool = MotionEvent.TOOL_TYPE_FINGER, stepMs = stepMs)
@@ -676,7 +679,7 @@ class EditorDeviceTest {
         val d = m()
         val dragged = atLift[Matrix.MTRANS_Y] - c[Matrix.MTRANS_Y]
         val glided = d[Matrix.MTRANS_Y] - atLift[Matrix.MTRANS_Y]
-        var rv = 0f; s.onActivity { rv = it.lastReleaseVelocity }
+        val rv = act!!.lastReleaseVelocity
         log("navigation: fast flick of 600px moved ${-dragged} px while dragging, then glided ${-glided} px (release velocity $rv px/s, density ${ctx.resources.displayMetrics.density})")
         assertTrue("fast drags go further than the finger (${-dragged})", -dragged > 600 * 1.3f)
         assertTrue("keeps gliding after a fast flick (${-glided})", -glided > 150f)
