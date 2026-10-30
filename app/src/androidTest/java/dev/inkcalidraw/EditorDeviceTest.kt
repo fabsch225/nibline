@@ -670,15 +670,15 @@ class EditorDeviceTest {
         assertTrue("slow drags stay close to 1:1 ($slowDy)", slowDy < -170f && slowDy > -280f)
 
         val c = m()
-        drag(0f, -420f, 10, 5) // fast flick up
+        drag(0f, -600f, 6, 0) // fast flick up (the emulator delivers ~20 ms per injected event)
         val atLift = m()
         SystemClock.sleep(1200)
         val d = m()
         val dragged = atLift[Matrix.MTRANS_Y] - c[Matrix.MTRANS_Y]
         val glided = d[Matrix.MTRANS_Y] - atLift[Matrix.MTRANS_Y]
         var rv = 0f; s.onActivity { rv = it.lastReleaseVelocity }
-        log("navigation: fast flick of 420px moved ${-dragged} px while dragging, then glided ${-glided} px (release velocity $rv px/s, density ${ctx.resources.displayMetrics.density})")
-        assertTrue("fast drags go further than the finger (${-dragged})", -dragged > 420 * 1.4f)
+        log("navigation: fast flick of 600px moved ${-dragged} px while dragging, then glided ${-glided} px (release velocity $rv px/s, density ${ctx.resources.displayMetrics.density})")
+        assertTrue("fast drags go further than the finger (${-dragged})", -dragged > 600 * 1.3f)
         assertTrue("keeps gliding after a fast flick (${-glided})", -glided > 150f)
         assertEquals("still no horizontal movement", a[Matrix.MTRANS_X], d[Matrix.MTRANS_X], 1f)
 

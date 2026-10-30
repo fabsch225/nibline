@@ -111,7 +111,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private var fingerVy = 0f   // finger speed for scroll acceleration (px/s)
     @Volatile var lastReleaseVelocity = 0f; private set // for tests
     private val fling by lazy { android.widget.OverScroller(this, DecelerateInterpolator(1.2f)) }
-    private var flingAnim: ValueAnimator? = null
+    private var flingFrame: android.view.Choreographer.FrameCallback? = null
 
     private val pickPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { insertPdf(it) } }
     private val exportPdf = registerForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri -> uri?.let { writePdf(it) } }
@@ -722,7 +722,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
     }
 
     private fun stopFling() {
-        flingAnim?.cancel(); flingAnim = null
+        flingFrame?.let { android.view.Choreographer.getInstance().removeFrameCallback(it) }
+        flingFrame = null
         fling.forceFinished(true)
     }
 
@@ -752,16 +753,19 @@ class EditorActivity : ComponentActivity(), Live.Source {
         stopFling()
         fling.fling(0, ty, 0, vy.toInt(), 0, 0, range.first, range.second)
         var last = ty
-        flingAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 4000; repeatCount = ValueAnimator.INFINITE
-            addUpdateListener {
-                if (!fling.computeScrollOffset()) { stopFling(); return@addUpdateListener }
+        // Driven by the display's frame clock, not an animator: gliding must work with system animations turned off.
+        val cb = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (flingFrame !== this) return
+                if (!fling.computeScrollOffset()) { flingFrame = null; return }
                 val y = fling.currY
                 view.postTranslate(0f, (y - last).toFloat()); last = y
                 redraw()
+                android.view.Choreographer.getInstance().postFrameCallback(this)
             }
-            start()
         }
+        flingFrame = cb
+        android.view.Choreographer.getInstance().postFrameCallback(cb)
     }
 
     private fun resetFingers(ev: MotionEvent, exclude: Int = -1) {
