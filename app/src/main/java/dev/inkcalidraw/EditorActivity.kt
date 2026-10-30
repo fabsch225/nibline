@@ -856,7 +856,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         if (abs(rv) > abs(vy)) vy = rv
         android.util.Log.d("InkNav", "release: tracker=${vt != null} vy=$vy recent=$rv fingerVy=$fingerVy zoomed=$zoomedThisGesture hint=$hint")
         lastReleaseVelocity = vy
-        val flingUp = !zoomedThisGesture && hint == null && abs(vy) > 900 * resources.displayMetrics.density &&
+        val flingUp = !zoomedThisGesture && hint == null && abs(vy) > 400 * resources.displayMetrics.density &&
             (!meta.paged || meta.direction == PageDirection.VERTICAL || abs(vy) > abs(fingerVx) * 1.5f)
         if (flingUp) startFling(vy * scrollGain(vy))
         if (!meta.paged) { hint = null; redraw(); return }
