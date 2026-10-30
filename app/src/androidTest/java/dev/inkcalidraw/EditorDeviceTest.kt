@@ -140,16 +140,24 @@ class EditorDeviceTest {
         val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "wet-vs-dry"))
         val r = surfaceRect(s)
         val pts = wave(r, r.top + r.height() * 0.45f)
+        val box = Rect(pts.minOf { it[0] }.toInt() - 30, pts.minOf { it[1] }.toInt() - 30, pts.maxOf { it[0] }.toInt() + 30, pts.maxOf { it[1] }.toInt() + 30)
+        // On a freshly booted emulator the first screenshots can show a stale frame: retry until the ink is in it.
+        fun inkIn(b: Bitmap): Int { var n = 0; for (y in box.top until box.bottom step 3) for (x in box.left until box.right step 3) if (Color.red(b.getPixel(x, y)) < 200) n++; return n }
+        fun shotWithInk(name: String, nudge: () -> Unit = {}): Bitmap {
+            var b = shot(name)
+            for (i in 0 until 10) { if (inkIn(b) > 60) break; nudge(); SystemClock.sleep(300); b = shot(name) }
+            return b
+        }
         val down = gesture(pts, lift = false)
+        val settle = { repeat(6) { SystemClock.sleep(8); inject(event(MotionEvent.ACTION_MOVE, down, pts.last()[0], pts.last()[1], pts.last()[2], MotionEvent.TOOL_TYPE_STYLUS)) } }
         // let the predictor settle on the last point, then capture the wet stroke
-        repeat(6) { SystemClock.sleep(8); inject(event(MotionEvent.ACTION_MOVE, down, pts.last()[0], pts.last()[1], pts.last()[2], MotionEvent.TOOL_TYPE_STYLUS)) }
-        val wet = shot("01-wet-stroke")
+        settle()
+        val wet = shotWithInk("01-wet-stroke", settle)
         inject(event(MotionEvent.ACTION_UP, down, pts.last()[0], pts.last()[1], pts.last()[2], MotionEvent.TOOL_TYPE_STYLUS))
-        val dry = shot("02-committed-stroke")
+        val dry = shotWithInk("02-committed-stroke")
         assertEquals(1, live(s, "freedraw"))
 
         // Compare the stroke area pixel by pixel (ignore the pen tip, where prediction may still differ).
-        val box = Rect(pts.minOf { it[0] }.toInt() - 30, pts.minOf { it[1] }.toInt() - 30, pts.maxOf { it[0] }.toInt() + 30, pts.maxOf { it[1] }.toInt() + 30)
         var inked = 0; var differ = 0
         for (y in box.top until box.bottom step 1) for (x in box.left until box.right step 1) {
             // Skip the pen tip: emulator screenshots can lag the front buffer by a frame there.
