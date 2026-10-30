@@ -510,7 +510,9 @@ class EditorDeviceTest {
                 val r = surfaceRect(s)
                 val y = r.top + r.height() * (0.25f + 0.5f * Math.random().toFloat())
                 val before = inkAround(r, y)
-                device.findObject(By.desc("Pen")).click(); SystemClock.sleep(300)
+                // select the pen directly: tapping "Pen" while it's already selected opens the pen-type menu
+                s.onActivity { a -> EditorActivity::class.java.getDeclaredMethod("selectTool", EditorActivity.Tool::class.java).apply { isAccessible = true }.invoke(a, EditorActivity.Tool.PEN) }
+                SystemClock.sleep(200)
                 gesture(wave(r, y))
                 var after = 0
                 for (i in 0 until 8) { SystemClock.sleep(250); after = inkAround(r, y); if (after - before > 150) break }
