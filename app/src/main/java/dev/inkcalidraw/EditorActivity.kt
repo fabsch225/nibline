@@ -36,7 +36,7 @@ import kotlin.math.hypot
 
 class EditorActivity : ComponentActivity(), Live.Source {
 
-    enum class Tool(val key: String) { PEN("pen"), HIGHLIGHTER("highlighter"), ERASER("eraser"), SELECT("select") }
+    enum class Tool(val key: String) { PEN("pen"), HIGHLIGHTER("highlighter"), SHAPE("shape"), LASER("laser"), ERASER("eraser"), SELECT("select") }
 
     private lateinit var ui: Ui
     private lateinit var store: NoteStore
@@ -77,7 +77,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private var penOnly = true
 
     // ---- drawing-pointer gesture state ----
-    private enum class G { NONE, INK, ERASE, LASSO, DRAG, RESIZE, BUTTON }
+    private enum class G { NONE, INK, ERASE, LASSO, DRAG, RESIZE, BUTTON, SHAPE, LASER }
     private var g = G.NONE
     private var drawPointer = -1
     private var strokeCounter = 0
@@ -102,6 +102,29 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private val jx = OneEuroFilter.forPenPosition(); private val jy = OneEuroFilter.forPenPosition(); private val jp = OneEuroFilter.forPressure()
     /** Last drawing tool (pen or highlighter): tapping a colour from the eraser/lasso goes back to it. */
     private var lastInkTool = Tool.PEN
+
+    // ---- shapes ----
+    private var shapeKind = ShapeKind.RECTANGLE
+    private var shapeStart = FloatArray(2)
+    /** Shape being dragged out (shape tool) or a stroke that snapped to a shape (held at its end); not in the scene yet. */
+    private var shapePreview: Element? = null
+    private var snappedLine = false        // a held stroke became a line: moving the pen still moves its end
+    private var snapShapes = true          // hold at the end of a stroke to make it a shape
+    private var holdAnchorX = 0f; private var holdAnchorY = 0f
+    private val holdToShape = Runnable { snapHeldStroke() }
+
+    // ---- eraser ----
+    private var areaEraser = false         // erase only the parts of strokes under the eraser
+
+    // ---- writing guide ----
+    private var guideOn = true
+    private var guide: WritingGuide.Line? = null
+    private val recentStrokes = ArrayList<WritingGuide.Stroke>()
+
+    // ---- laser pointer ----
+    private val laser = ArrayList<FloatArray>()  // world x, y, time (uptime ms, as float offset)
+    private val laserT0 = SystemClock.uptimeMillis()
+    private var laserFrame: android.view.Choreographer.FrameCallback? = null
     private val fingerHold = Runnable {
         // not for a palm resting while the pen is near
         if (lastFingerCount == 1 && SystemClock.uptimeMillis() - lastPenNear > 400) { lastFingerCount = 0; showCanvasMenu(holdX, holdY) }
@@ -154,6 +177,10 @@ class EditorActivity : ComponentActivity(), Live.Source {
         colors = ColorHistory(this)
         penOnly = getSharedPreferences("ui", 0).getBoolean("penOnly", true)
         pressureLevel = PenPressure.level(this)
+        getSharedPreferences("ui", 0).let { p ->
+            snapShapes = p.getBoolean("snapShapes", true); areaEraser = p.getBoolean("areaEraser", false)
+            guideOn = p.getBoolean("writingGuide", true); shapeKind = ShapeKind.of(p.getString("shape", null))
+        }
 
         folder = intent.getStringExtra(EXTRA_FOLDER)?.let { store.folder(Uri.parse(it)) } ?: externalFolder(intent?.data) ?: store.root()
         // PDFs annotated by this note live next to it (or in app storage for notes opened from elsewhere).
@@ -363,7 +390,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun buildFrame(): CanvasSurface.Frame {
         val files = scene.files.toMap()
-        val elements = scene.snapshot()
+        val elements = scene.snapshot().let { e -> shapePreview?.let { e + it } ?: e }
         val sel = selectionBox()
         return CanvasSurface.Frame(
             input = SceneRenderer.Input(
@@ -379,6 +406,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
             handle = if (sel != null && singleSelectedImage() != null) RectF(sel.right - 9f / scale(), sel.bottom - 9f / scale(), sel.right + 9f / scale(), sel.bottom + 9f / scale()) else null,
             eraser = eraserCursor,
             hint = hint,
+            guide = guideLine(),
+            laser = laserTrail(),
         )
     }
 
@@ -457,7 +486,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun abortDrawing(ev: MotionEvent) {
         if (g == G.INK) { surface.cancelWet(); Live.wetEnd() }
-        main.removeCallbacks(holdForMenu)
+        if (g == G.SHAPE) { shapePreview = null; Live.wetEnd() }
+        main.removeCallbacks(holdForMenu); main.removeCallbacks(holdToShape)
         g = G.NONE; drawPointer = -1; eraserCursor = null; lasso.clear(); dragDx = 0f; dragDy = 0f
         redraw()
     }
@@ -497,6 +527,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
             sel != null && sel.contains(w[0], w[1]) -> G.DRAG
             lassoArmed || tool == Tool.SELECT -> G.LASSO
             tool == Tool.ERASER -> G.ERASE
+            tool == Tool.LASER -> G.LASER
+            tool == Tool.SHAPE -> G.SHAPE
             else -> G.INK
         }
         when (g) {
@@ -505,6 +537,11 @@ class EditorActivity : ComponentActivity(), Live.Source {
             G.DRAG -> { lastWorld = w }
             G.RESIZE -> { pushUndo(); resizeIndex = scene.elements.indexOfFirst { it.id == selected.single() } }
             G.LASSO -> { setSelection(emptySet()); lasso.clear(); lasso.add(w); redraw() }
+            G.SHAPE -> {
+                if (selected.isNotEmpty()) setSelection(emptySet())
+                shapeStart = w; shapePreview = null; snappedLine = false
+            }
+            G.LASER -> { laserAdd(w); startLaser() }
             G.INK -> {
                 if (meta.paged && Pages.pageAt(Pages.pages(scene), w[0].toDouble(), w[1].toDouble()) == null) { g = G.NONE; return }
                 if (selected.isNotEmpty()) setSelection(emptySet())
@@ -512,6 +549,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
                 strokeCounter++
                 sampleCount = 0
                 jx.reset(); jy.reset(); jp.reset()
+                holdAnchorX = sx; holdAnchorY = sy
+                if (snapShapes) main.postDelayed(holdToShape, HOLD_TO_SHAPE_MS)
                 penSample(sx, sy, pressureOf(ev, idx, -1), ev.eventTime)
                 predictor.record(ev)
                 renderWet(null)
@@ -571,6 +610,21 @@ class EditorActivity : ComponentActivity(), Live.Source {
                 predictor.record(ev)
                 val predicted = predictor.predict()
                 try { renderWet(predicted) } finally { predicted?.recycle() }
+                // still moving: restart the hold-to-shape timer
+                if (snapShapes && hypot(ev.getX(p) - holdAnchorX, ev.getY(p) - holdAnchorY) > ui.dp(5)) {
+                    holdAnchorX = ev.getX(p); holdAnchorY = ev.getY(p)
+                    main.removeCallbacks(holdToShape); main.postDelayed(holdToShape, HOLD_TO_SHAPE_MS)
+                }
+            }
+            G.SHAPE -> {
+                val w = toWorld(ev.getX(p), ev.getY(p))
+                if (snappedLine) updateSnappedLine(w)
+                else if (tool == Tool.SHAPE) dragShape(w)
+                // other snapped shapes stay as they snapped until the pen lifts
+            }
+            G.LASER -> {
+                for (h in 0 until ev.historySize) laserAdd(toWorld(ev.getHistoricalX(p, h), ev.getHistoricalY(p, h)))
+                laserAdd(toWorld(ev.getX(p), ev.getY(p)))
             }
             G.BUTTON -> {
                 if (hypot(ev.getX(p) - downX, ev.getY(p) - downY) > ui.dp(6)) {
@@ -596,7 +650,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     }
 
     private fun drawUp(ev: MotionEvent, idx: Int, canceled: Boolean) {
-        main.removeCallbacks(holdForMenu)
+        main.removeCallbacks(holdForMenu); main.removeCallbacks(holdToShape)
         if (isPen(ev.getToolType(idx))) lastPenNear = SystemClock.uptimeMillis()
         when (g) {
             G.INK -> if (canceled) { surface.cancelWet(); Live.wetEnd() } else {
@@ -607,6 +661,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
             G.LASSO -> { if (!canceled) setSelection(elementsInLasso()); lassoArmed = false; updateToolButtons() }
             G.DRAG -> commitDrag(canceled)
             G.RESIZE -> { resizeIndex = -1; markDirty() }
+            G.SHAPE -> commitShape(canceled)
+            G.LASER -> {}
             else -> {}
         }
         g = G.NONE; drawPointer = -1; eraserCursor = null; lasso.clear()
@@ -621,9 +677,165 @@ class EditorActivity : ComponentActivity(), Live.Source {
         pushUndo()
         val brush = activeProfile().id.takeIf { it != "pen" }
         scene.elements.add(ExcalidrawScene.newFreedraw(pts, pen.color, pen.strokeWidth, FractionalIndex.after(scene.lastIndex()), pen.opacity, frameId, brush, exactPath = true))
+        if (tool == Tool.PEN) noteStrokeForGuide(pts) else { recentStrokes.clear(); guide = null }
         markDirty()
         Live.wetEnd()
         surface.commitWet(buildFrame()) // scene with the new stroke replaces the wet ink atomically
+    }
+
+    // =============================================================== shapes
+
+    private fun shapeFrameId(x: Double, y: Double) = if (meta.paged) Pages.pageAt(Pages.pages(scene), x, y)?.id else null
+
+    private fun shapeElement(r: ShapeRecognizer.Result): Element {
+        val pen = activePen(); val sw = Shapes.strokeFor(pen.strokeWidth); val idx = FractionalIndex.after(scene.lastIndex())
+        return when (r) {
+            is ShapeRecognizer.Result.Line -> Shapes.build(ShapeKind.LINE, r.ax, r.ay, r.bx, r.by, pen.color, sw, pen.opacity, idx, shapeFrameId(r.ax, r.ay))
+            is ShapeRecognizer.Result.Box -> Shapes.build(r.kind, r.x, r.y, r.x + r.w, r.y + r.h, pen.color, sw, pen.opacity, idx, shapeFrameId(r.x + r.w / 2, r.y + r.h / 2))
+            is ShapeRecognizer.Result.Polygon -> Shapes.polyline("line", r.corners + listOf(r.corners[0]), pen.color, sw, pen.opacity, idx,
+                shapeFrameId(r.corners.map { it[0] }.average(), r.corners.map { it[1] }.average()))
+        }
+    }
+
+    /** The pen rested at the end of a stroke: if the stroke is close to a shape, it becomes that shape. */
+    private fun snapHeldStroke() {
+        if (g != G.INK || !snapShapes || sampleCount < 3) return
+        val pts = (0 until sampleCount).map { doubleArrayOf(samples[it * 3].toDouble(), samples[it * 3 + 1].toDouble()) }
+        val r = ShapeRecognizer.recognize(pts) ?: return
+        // handwriting pauses at the end of small strokes (an "o", an "l"): only bigger drawings snap
+        val xs = pts.map { it[0] }; val ys = pts.map { it[1] }
+        if (hypot(xs.max() - xs.min(), ys.max() - ys.min()) * scale() < ui.dp(36)) return
+        val el = shapeElement(r)
+        surface.cancelWet()
+        shapePreview = el
+        snappedLine = r is ShapeRecognizer.Result.Line
+        if (r is ShapeRecognizer.Result.Line) shapeStart = floatArrayOf(r.ax.toFloat(), r.ay.toFloat())
+        g = G.SHAPE
+        surface.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        Live.wetEnd(); Live.wet { el.json }
+        redraw()
+    }
+
+    private fun updateSnappedLine(w: FloatArray) {
+        val pen = activePen()
+        val e = Shapes.snapAngle(shapeStart[0].toDouble(), shapeStart[1].toDouble(), w[0].toDouble(), w[1].toDouble())
+        val el = Shapes.build(ShapeKind.LINE, shapeStart[0].toDouble(), shapeStart[1].toDouble(), e[0], e[1], pen.color, Shapes.strokeFor(pen.strokeWidth), pen.opacity,
+            FractionalIndex.after(scene.lastIndex()), shapeFrameId(shapeStart[0].toDouble(), shapeStart[1].toDouble()))
+        shapePreview = el; Live.wet { el.json }; redraw()
+    }
+
+    /** Shape tool: drag from one corner (or end) to the other. */
+    private fun dragShape(w: FloatArray) {
+        val pen = activePen()
+        val ax = shapeStart[0].toDouble(); val ay = shapeStart[1].toDouble()
+        var bx = w[0].toDouble(); var by = w[1].toDouble()
+        if (shapeKind == ShapeKind.LINE || shapeKind == ShapeKind.ARROW) Shapes.snapAngle(ax, ay, bx, by).let { bx = it[0]; by = it[1] }
+        val el = Shapes.build(shapeKind, ax, ay, bx, by, pen.color, Shapes.strokeFor(pen.strokeWidth), pen.opacity,
+            FractionalIndex.after(scene.lastIndex()), shapeFrameId((ax + bx) / 2, (ay + by) / 2))
+        shapePreview = el; Live.wet { el.json }; redraw()
+    }
+
+    private fun commitShape(canceled: Boolean) {
+        val el = shapePreview
+        shapePreview = null; snappedLine = false
+        Live.wetEnd()
+        if (canceled || el == null) return
+        val tiny = ui.dp(4) / scale()
+        if (el.width < tiny && el.height < tiny) return
+        pushUndo()
+        scene.elements.add(el)
+        recentStrokes.clear(); guide = null
+        markDirty()
+    }
+
+    private fun showShapeMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            ShapeKind.entries.forEachIndexed { i, k -> menu.add(3, i, i, k.label).apply { isCheckable = true; isChecked = k == shapeKind } }
+            menu.setGroupCheckable(3, true, true)
+            setOnMenuItemClickListener {
+                shapeKind = ShapeKind.entries[it.itemId]
+                getSharedPreferences("ui", 0).edit().putString("shape", shapeKind.key).apply()
+                selectTool(Tool.SHAPE); true
+            }
+        }.show()
+    }
+
+    private fun showEraserMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add(4, 0, 0, "Erase whole strokes").apply { isCheckable = true; isChecked = !areaEraser }
+            menu.add(4, 1, 1, "Erase areas (parts of strokes)").apply { isCheckable = true; isChecked = areaEraser }
+            menu.setGroupCheckable(4, true, true)
+            setOnMenuItemClickListener {
+                areaEraser = it.itemId == 1
+                getSharedPreferences("ui", 0).edit().putBoolean("areaEraser", areaEraser).apply(); true
+            }
+        }.show()
+    }
+
+    // =============================================================== writing guide
+
+    private fun noteStrokeForGuide(pts: List<FloatArray>) {
+        var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
+        for (p in pts) { x0 = minOf(x0, p[0].toDouble()); y0 = minOf(y0, p[1].toDouble()); x1 = maxOf(x1, p[0].toDouble()); y1 = maxOf(y1, p[1].toDouble()) }
+        recentStrokes.add(WritingGuide.Stroke(x0, y0, x1, y1))
+        if (recentStrokes.size > 60) recentStrokes.removeAt(0)
+        guide = if (guideOn) WritingGuide.baseline(recentStrokes, maxLetter = (ui.dp(70) / scale()).toDouble()) else null
+    }
+
+    /** The guide from the start of the line to the edge of the page (or of the screen). */
+    private fun guideLine(): FloatArray? {
+        val l = guide ?: return null
+        if (!guideOn) return null
+        var end = if (surface.width > 0) visibleWorld().maxX else l.x0 + 2000.0
+        if (meta.paged) Pages.pageAt(Pages.pages(scene), l.x0, l.yAt(l.x0))?.let { end = it.x + it.w - 24 }
+        if (end <= l.x0) return null
+        return floatArrayOf(l.x0.toFloat(), l.yAt(l.x0).toFloat(), end.toFloat(), l.yAt(end).toFloat())
+    }
+
+    // =============================================================== laser pointer
+
+    private fun laserNow() = (SystemClock.uptimeMillis() - laserT0).toFloat()
+
+    private fun laserAdd(w: FloatArray) {
+        val last = laser.lastOrNull()
+        if (last != null && hypot(w[0] - last[0], w[1] - last[1]) * scale() < 1.5f) { last[2] = laserNow(); return }
+        laser.add(floatArrayOf(w[0], w[1], laserNow()))
+    }
+
+    private fun laserAlpha(age: Float) = (1f - (age - LASER_HOLD_MS) / LASER_FADE_MS).coerceIn(0f, 1f)
+
+    private fun laserTrail(): List<FloatArray>? {
+        if (laser.isEmpty()) return null
+        val now = laserNow()
+        return laser.mapIndexed { i, p ->
+            val a = if (g == G.LASER && i == laser.lastIndex) 1f else laserAlpha(now - p[2])
+            floatArrayOf(p[0], p[1], a)
+        }
+    }
+
+    /** Laser trail for live viewers: a red stroke along its still-visible part. */
+    private fun laserElement(): kotlinx.serialization.json.JsonObject? {
+        val now = laserNow()
+        val pts = laser.filter { laserAlpha(now - it[2]) > 0.35f }.map { floatArrayOf(it[0], it[1], 0.5f) }
+        if (pts.isEmpty()) return null
+        return ExcalidrawScene.newFreedraw(if (pts.size == 1) listOf(pts[0], pts[0]) else pts, "#ff3b30", 1.0, FractionalIndex.after(scene.lastIndex()), 90, null, null).json
+    }
+
+    /** Animates the trail (it fades out behind the pen) until it's gone. */
+    private fun startLaser() {
+        if (laserFrame != null) return
+        laserFrame = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                val now = laserNow()
+                while (laser.size > 1 && laserAlpha(now - laser[0][2]) <= 0f) laser.removeAt(0)
+                if (g != G.LASER && laser.isNotEmpty() && laserAlpha(now - laser.last()[2]) <= 0f) laser.clear()
+                if (laser.isEmpty()) { laserFrame = null; Live.wetEnd(); redraw(); return }
+                laserElement()?.let { e -> Live.wet { e } } ?: Live.wetEnd()
+                redraw()
+                android.view.Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+        android.view.Choreographer.getInstance().postFrameCallback(laserFrame!!)
     }
 
     // =============================================================== pen button menu
@@ -680,15 +892,29 @@ class EditorActivity : ComponentActivity(), Live.Source {
         val r = (eraserRadiusPx() / scale()).toDouble()
         val ax = a[0].toDouble(); val ay = a[1].toDouble(); val bx = b[0].toDouble(); val by = b[1].toDouble()
         var erased: MutableSet<String>? = null
+        var cuts: MutableList<Pair<Int, List<Element>>>? = null
         val els = scene.elements
         for (i in els.indices) {
             val el = els[i]
             if (el.isDeleted || el.locked || el.type == "frame") continue
             if (Geometry.eraserHits(el, ax, ay, bx, by, r)) {
+                if (areaEraser && el.type == "freedraw") {
+                    val pieces = AreaEraser.cut(el, ax, ay, bx, by, r) ?: continue
+                    if (!eraseSnapshot) { pushUndo(); eraseSnapshot = true }
+                    (cuts ?: ArrayList<Pair<Int, List<Element>>>().also { cuts = it }).add(i to pieces)
+                    (erased ?: HashSet<String>().also { erased = it }).add(el.id)
+                    continue
+                }
                 if (!eraseSnapshot) { pushUndo(); eraseSnapshot = true }
                 els[i] = el.withChanges("isDeleted" to JsonPrimitive(true))
                 (erased ?: HashSet<String>().also { erased = it }).add(el.id)
             }
+        }
+        // replace cut strokes by what's left of them (from the end, so earlier positions stay valid)
+        cuts?.asReversed()?.forEach { (i, pieces) ->
+            val el = els[i]
+            if (pieces.isEmpty()) els[i] = el.withChanges("isDeleted" to JsonPrimitive(true))
+            else { els[i] = pieces[0]; els.addAll(i + 1, pieces.drop(1)) }
         }
         val gone = erased ?: return
         if (selected.isNotEmpty()) selected = selected - gone
@@ -1334,7 +1560,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun activePen(): PenConfig = meta.penFor(activeProfile().id)
 
     private fun setPen(update: (PenConfig) -> PenConfig) {
-        if (tool != Tool.PEN && tool != Tool.HIGHLIGHTER) {
+        if (tool != Tool.PEN && tool != Tool.HIGHLIGHTER && tool != Tool.SHAPE) {
             // colour tapped while erasing/selecting: back to the pen or highlighter that was in use
             tool = lastInkTool; lassoArmed = false
             if (selected.isNotEmpty()) setSelection(emptySet())
@@ -1410,15 +1636,23 @@ class EditorActivity : ComponentActivity(), Live.Source {
     /** Lower, compact bar: everything for drawing. Stays visible in fullscreen. */
     private fun buildDrawBar(): View {
         val bar = barRow()
-        for ((t, icon, label) in listOf(Triple(Tool.PEN, Icon.PEN, "Pen"), Triple(Tool.HIGHLIGHTER, Icon.HIGHLIGHTER, "Highlighter"), Triple(Tool.ERASER, Icon.ERASER, "Eraser"), Triple(Tool.SELECT, Icon.LASSO, "Lasso select"))) {
+        for ((t, icon, label) in listOf(Triple(Tool.PEN, Icon.PEN, "Pen"), Triple(Tool.HIGHLIGHTER, Icon.HIGHLIGHTER, "Highlighter"), Triple(Tool.SHAPE, Icon.SHAPE, "Shapes"),
+                Triple(Tool.LASER, Icon.LASER, "Laser pointer"), Triple(Tool.ERASER, Icon.ERASER, "Eraser"), Triple(Tool.SELECT, Icon.LASSO, "Lasso select"))) {
             val b = iconButton(icon, label, small = true) {
                 when {
                     t == Tool.PEN && tool == Tool.PEN -> showProfiles(it)
                     t == Tool.HIGHLIGHTER && tool == Tool.HIGHLIGHTER -> showWidths(it)
+                    t == Tool.SHAPE && tool == Tool.SHAPE -> showShapeMenu(it)
+                    t == Tool.ERASER && tool == Tool.ERASER -> showEraserMenu(it)
                     else -> selectTool(t)
                 }
             }
-            if (t == Tool.PEN) b.setOnLongClickListener { showProfiles(it); true }
+            when (t) {
+                Tool.PEN -> b.setOnLongClickListener { showProfiles(it); true }
+                Tool.SHAPE -> b.setOnLongClickListener { showShapeMenu(it); true }
+                Tool.ERASER -> b.setOnLongClickListener { showEraserMenu(it); true }
+                else -> {}
+            }
             toolButtons[t] = b; bar.addView(b)
         }
         bar.addView(separator())
@@ -1481,6 +1715,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun showMoreMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
             menu.add(0, 1, 0, "Draw with pen only").apply { isCheckable = true; isChecked = penOnly }
+            menu.add(0, 2, 0, "Hold at stroke end for shapes").apply { isCheckable = true; isChecked = snapShapes }
+            menu.add(0, 3, 0, "Writing guide line").apply { isCheckable = true; isChecked = guideOn }
             val theme = menu.addSubMenu("Dark mode")
             val cur = Ui.themeSetting(this@EditorActivity)
             for ((k, l) in listOf("system" to "Follow system", "light" to "Light", "dark" to "Dark")) theme.add(1, 0, 0, l).apply { isCheckable = true; isChecked = cur == k }
@@ -1500,6 +1736,11 @@ class EditorActivity : ComponentActivity(), Live.Source {
                 val t = it.title.toString()
                 when {
                     it.itemId in 10..12 -> { pressureLevel = PenPressure.levels[it.itemId - 10].first; PenPressure.setLevel(this@EditorActivity, pressureLevel); toast("Pen pressure: ${PenPressure.levels[it.itemId - 10].second.lowercase()}") }
+                    it.itemId == 2 -> { snapShapes = !snapShapes; getSharedPreferences("ui", 0).edit().putBoolean("snapShapes", snapShapes).apply()
+                        toast(if (snapShapes) "Hold the pen still at the end of a stroke to turn it into a shape" else "Strokes stay as drawn") }
+                    it.itemId == 3 -> { guideOn = !guideOn; getSharedPreferences("ui", 0).edit().putBoolean("writingGuide", guideOn).apply()
+                        if (!guideOn) guide = null; redraw()
+                        toast(if (guideOn) "A guide line appears under handwriting" else "Writing guide off") }
                     it.itemId == 1 -> { penOnly = !penOnly; getSharedPreferences("ui", 0).edit().putBoolean("penOnly", penOnly).apply(); toast(if (penOnly) "Fingers navigate, only the pen draws" else "Fingers draw too; use two fingers to navigate") }
                     t == "Follow system" -> { Ui.setThemeSetting(this@EditorActivity, "system"); saveNow(); recreate() }
                     t == "Light" -> { Ui.setThemeSetting(this@EditorActivity, "light"); saveNow(); recreate() }
@@ -1561,5 +1802,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
-    companion object { const val EXTRA_NAME = "name"; const val EXTRA_FOLDER = "folder"; const val EXTRA_FOLDER_PATH = "folderPath" }
+    companion object {
+        const val HOLD_TO_SHAPE_MS = 450L; const val LASER_HOLD_MS = 450f; const val LASER_FADE_MS = 550f
+        const val EXTRA_NAME = "name"; const val EXTRA_FOLDER = "folder"; const val EXTRA_FOLDER_PATH = "folderPath" }
 }

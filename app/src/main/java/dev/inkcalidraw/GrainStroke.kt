@@ -79,19 +79,45 @@ object GrainStroke {
         return out
     }
 
-    /** Draws the bands clipped to [outline] with [paint] (its alpha is the stroke's opacity). */
-    fun draw(canvas: Canvas, outline: Path, bands: Array<Path?>, paint: Paint) {
+    /**
+     * Graphite and chalk thin out towards the edge of a stroke: the tip only grazes the paper there. The stroke is
+     * split into nested rings (the full outline, and the same stroke at [RINGS] smaller sizes, computed from the
+     * same stroke points); each ring is drawn with a sparser grain than the one inside it. The rings are disjoint
+     * (clip / clip-out), so nothing is drawn twice, and they only depend on the stroke points: while drawing, the
+     * part of the stroke behind the pen tip never changes, so nothing flickers.
+     */
+    val RINGS = doubleArrayOf(1.0, 0.74, 0.46)
+
+    class Prepared(val rings: Array<Path>, val bands: Array<Path?>)
+
+    fun prepare(points: List<PerfectFreehand.StrokePoint>, o: PerfectFreehand.Options, brush: String, outline: Path): Prepared {
+        val rings = Array(RINGS.size) { i ->
+            if (i == 0) outline else {
+                val oi = PerfectFreehand.Options(o.size * RINGS[i], o.thinning, o.smoothing, o.streamline, o.simulatePressure, o.easing, o.last)
+                SceneRenderer.outlinePath(PerfectFreehand.getStrokeOutlinePoints(points, oi))
+            }
+        }
+        return Prepared(rings, bands(points, o, brush))
+    }
+
+    /** Draws a prepared stroke with [paint] (its alpha is the stroke's opacity) and the brush's ring [shaders] (edge first). */
+    fun draw(canvas: Canvas, s: Prepared, paint: Paint, shaders: Array<android.graphics.Shader>) {
         val base = paint.alpha
         val aa = paint.isAntiAlias
-        canvas.save()
-        canvas.clipPath(outline)
-        paint.isAntiAlias = false
-        for (l in bands.indices) {
-            val b = bands[l] ?: continue
-            paint.alpha = (base * l / (LEVELS - 1f)).roundToInt().coerceIn(0, 255)
-            canvas.drawPath(b, paint)
+        for (k in s.rings.indices) {
+            canvas.save()
+            canvas.clipPath(s.rings[k])
+            if (k + 1 < s.rings.size) canvas.clipOutPath(s.rings[k + 1])
+            paint.shader = shaders[minOf(k, shaders.size - 1)]
+            paint.isAntiAlias = false
+            for (l in s.bands.indices) {
+                val b = s.bands[l] ?: continue
+                paint.alpha = (base * l / (LEVELS - 1f)).roundToInt().coerceIn(0, 255)
+                canvas.drawPath(b, paint)
+            }
+            canvas.restore()
         }
-        canvas.restore()
+        paint.shader = null
         paint.alpha = base
         paint.isAntiAlias = aa
     }

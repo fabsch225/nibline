@@ -11,6 +11,7 @@ import android.util.Base64
 import android.util.LruCache
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.contentOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
@@ -46,7 +47,7 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
 
     /** Keyed by element identity: elements are immutable, an edit creates a new object. */
     private val pathCache = java.util.WeakHashMap<Element, Path>()
-    private val grains = HashMap<String, android.graphics.Shader>()
+    private val grains = HashMap<String, Array<android.graphics.Shader>>()
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
@@ -130,10 +131,10 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
 
     fun freedrawPath(el: Element): Path = pathCache.getOrPut(el) { outlinePath(el.freedrawOutline()) }
 
-    private val bandCache = java.util.WeakHashMap<Element, Array<Path?>>()
-    private fun grainBands(el: Element, brush: String): Array<Path?> = bandCache.getOrPut(el) {
+    private val bandCache = java.util.WeakHashMap<Element, GrainStroke.Prepared>()
+    private fun grainStroke(el: Element, brush: String): GrainStroke.Prepared = bandCache.getOrPut(el) {
         val o = PerfectFreehand.excalidrawOptions(el.strokeWidth, el.simulatePressure, last = false)
-        GrainStroke.bands(PerfectFreehand.getStrokePoints(el.freedrawInput(), o), o, brush)
+        GrainStroke.prepare(PerfectFreehand.getStrokePoints(el.freedrawInput(), o), o, brush, freedrawPath(el))
     }
 
     private fun drawElement(c: Canvas, el: Element, input: Input) {
@@ -147,11 +148,9 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
                 val brush = el.brush
                 if (GrainStroke.isGrainBrush(brush)) {
                     // grain pinned to the paper (the canvas is translated to the element here), pressure as darkness
-                    val sh = grains.getOrPut(brush!!) { PenProfiles.grainShader(brush) }
-                    PenProfiles.anchorGrain(sh, brush, el.x.toFloat(), el.y.toFloat())
-                    fill.shader = sh
-                    GrainStroke.draw(c, freedrawPath(el), grainBands(el, brush), fill)
-                    fill.shader = null
+                    val sh = grains.getOrPut(brush!!) { PenProfiles.grainShaders(brush) }
+                    PenProfiles.anchorGrains(sh, brush, el.x.toFloat(), el.y.toFloat())
+                    GrainStroke.draw(c, grainStroke(el, brush), fill, sh)
                 } else {
                     fill.shader = null
                     c.drawPath(freedrawPath(el), fill)
@@ -172,6 +171,10 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
                     val p = Path().apply { moveTo(pts[0][0].toFloat(), pts[0][1].toFloat()); pts.drop(1).forEach { lineTo(it[0].toFloat(), it[1].toFloat()) } }
                     stroke.color = col; stroke.alpha = alpha; stroke.strokeWidth = el.strokeWidth.toFloat()
                     c.drawPath(p, stroke)
+                    if (el.type == "arrow") {
+                        arrowhead(c, pts[pts.size - 2], pts.last(), el.strokeWidth, stroke, (el.json["endArrowhead"] as? JsonPrimitive)?.contentOrNull)
+                        arrowhead(c, pts[1], pts[0], el.strokeWidth, stroke, (el.json["startArrowhead"] as? JsonPrimitive)?.contentOrNull)
+                    }
                 }
             }
             "image" -> {
@@ -194,6 +197,22 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
             }
             else -> {}
         }
+    }
+
+    /** Excalidraw's "arrow" head: two strokes 30° off the shaft, about 4x the stroke width + 15 long (capped by the last segment). */
+    private fun arrowhead(c: Canvas, from: DoubleArray, tip: DoubleArray, sw: Double, p: Paint, kind: String?) {
+        if (kind == null || kind == "null") return
+        val dx = tip[0] - from[0]; val dy = tip[1] - from[1]; val seg = Math.hypot(dx, dy)
+        if (seg < 1e-6) return
+        val len = minOf(15.0 + sw * 4, seg * 0.75)
+        val a = Math.atan2(dy, dx)
+        val path = Path()
+        for (s in doubleArrayOf(-1.0, 1.0)) {
+            val t = a + Math.PI + s * Math.PI / 6
+            path.moveTo(tip[0].toFloat(), tip[1].toFloat())
+            path.lineTo((tip[0] + Math.cos(t) * len).toFloat(), (tip[1] + Math.sin(t) * len).toFloat())
+        }
+        c.drawPath(path, p)
     }
 
     private fun shape(c: Canvas, type: String, r: RectF, p: Paint) {

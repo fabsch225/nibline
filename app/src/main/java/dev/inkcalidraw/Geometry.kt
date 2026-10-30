@@ -97,8 +97,9 @@ object Geometry {
         val sweep = Box(min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)).inflate(r)
         if (!bounds(el).intersects(sweep)) return false
         return when (el.type) {
-            "freedraw", "line", "arrow" -> {
-                val pts = el.points
+            "freedraw", "line", "arrow", "rectangle", "diamond", "ellipse" -> {
+                if (el.type != "freedraw" && el.type != "line" && el.type != "arrow" && el.backgroundColor != "transparent") return true
+                val pts = if (el.type == "freedraw" || el.type == "line" || el.type == "arrow") el.points else Shapes.outline(el)
                 val reach = r + (if (el.type == "freedraw") el.strokeWidth * 2.0 else el.strokeWidth / 2)
                 val lax = ax - el.x; val lay = ay - el.y; val lbx = bx - el.x; val lby = by - el.y
                 if (pts.size == 1) return pointSegDist(pts[0][0], pts[0][1], lax, lay, lbx, lby) <= reach

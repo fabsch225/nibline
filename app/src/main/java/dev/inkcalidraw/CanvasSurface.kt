@@ -38,6 +38,8 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         val eraser: FloatArray? = null,   // screen x, y, radius
         val hint: String? = null,          // e.g. "Release to add page"
         val pageLabel: String? = null,
+        val guide: FloatArray? = null,     // writing guide line, world x0, y0, x1, y1
+        val laser: List<FloatArray>? = null, // laser trail, world x, y, alpha 0..1
     )
 
     /** One update of the stroke in progress (world coordinates). */
@@ -60,11 +62,15 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
     // ---- render-thread state ----
     private val sceneRenderer = SceneRenderer(dark = ui.dark)
     private val wetPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val grains = HashMap<String, android.graphics.Shader>()
+    private val grains = HashMap<String, Array<android.graphics.Shader>>()
     private var wetStrokeId = -1
     private var prevTail: RectF? = null
     private val overlayStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ui.accent }
     private val overlayFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.argb(150, Color.red(ui.accent), Color.green(ui.accent), Color.blue(ui.accent)) }
+    private val laserGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.rgb(255, 40, 40) }
+    private val laserCore = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.rgb(255, 70, 60) }
+    private val laserDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.rgb(255, 235, 230) }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = ui.dp(16) }
 
     init {
@@ -214,10 +220,9 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         val grain = w.grain
         if (GrainStroke.isGrainBrush(grain)) {
             // exactly what SceneRenderer draws for the committed stroke: grain pinned to the paper, pressure as darkness
-            val sh = grains.getOrPut(grain!!) { PenProfiles.grainShader(grain) }
-            PenProfiles.anchorGrain(sh, grain, 0f, 0f) // the wet stroke is drawn in scene coordinates
-            wetPaint.shader = sh
-            GrainStroke.draw(canvas, path, GrainStroke.bands(strokePoints, opts, grain), wetPaint)
+            val sh = grains.getOrPut(grain!!) { PenProfiles.grainShaders(grain) }
+            PenProfiles.anchorGrains(sh, grain, 0f, 0f) // the wet stroke is drawn in scene coordinates
+            GrainStroke.draw(canvas, GrainStroke.prepare(strokePoints, opts, grain, path), wetPaint, sh)
         } else {
             wetPaint.shader = null
             canvas.drawPath(path, wetPaint)
@@ -259,6 +264,29 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
                 overlayStroke.pathEffect = DashPathEffect(floatArrayOf(10f / s, 8f / s), 0f)
                 canvas.drawPath(p, overlayStroke)
                 overlayStroke.pathEffect = null
+            }
+        }
+        f.guide?.let { g ->
+            guidePaint.strokeWidth = ui.dp(1.5f) / s
+            guidePaint.pathEffect = DashPathEffect(floatArrayOf(ui.dp(6f) / s, ui.dp(5f) / s), 0f)
+            canvas.drawLine(g[0], g[1], g[2], g[3], guidePaint)
+        }
+        f.laser?.let { pts ->
+            for (i in 1 until pts.size) {
+                val a = pts[i - 1]; val b = pts[i]
+                val k = minOf(a[2], b[2])
+                laserGlow.strokeWidth = ui.dp(11f) / s; laserGlow.alpha = (70 * k).toInt()
+                canvas.drawLine(a[0], a[1], b[0], b[1], laserGlow)
+            }
+            for (i in 1 until pts.size) {
+                val a = pts[i - 1]; val b = pts[i]
+                val k = minOf(a[2], b[2])
+                laserCore.strokeWidth = ui.dp(3.5f) / s; laserCore.alpha = (255 * k).toInt()
+                canvas.drawLine(a[0], a[1], b[0], b[1], laserCore)
+            }
+            pts.lastOrNull()?.let { p ->
+                laserDot.alpha = (255 * p[2]).toInt()
+                canvas.drawCircle(p[0], p[1], ui.dp(4f) / s, laserDot)
             }
         }
         canvas.restore()

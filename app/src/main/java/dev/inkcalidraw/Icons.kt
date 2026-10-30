@@ -9,7 +9,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 
 /** Line icons drawn in a 24×24 grid (stroke 1.8), so they scale crisply and follow the theme colour. */
-enum class Icon { BACK, PEN, HIGHLIGHTER, ERASER, LASSO, IMAGE, PDF, UNDO, REDO, FIT, MORE, PLUS, PREV, NEXT, PASTE, PAGES, TRASH, COPY, CHECK, FOLDER, IMPORT, EXPORT, MOON, WIDTH, FULLSCREEN, FULLSCREEN_EXIT, FOLDER_PLUS, MOVE, LIVE }
+enum class Icon { BACK, PEN, HIGHLIGHTER, ERASER, LASSO, IMAGE, PDF, UNDO, REDO, FIT, MORE, PLUS, PREV, NEXT, PASTE, PAGES, TRASH, COPY, CHECK, FOLDER, IMPORT, EXPORT, MOON, WIDTH, FULLSCREEN, FULLSCREEN_EXIT, FOLDER_PLUS, MOVE, LIVE, SHAPE, LASER, GUIDE }
 
 class IconDrawable(private val icon: Icon, color: Int) : Drawable() {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -42,6 +42,22 @@ class IconDrawable(private val icon: Icon, color: Int) : Drawable() {
             Icon.ERASER -> {
                 P.moveTo(8f, 20f); P.lineTo(3.8f, 15.8f); P.lineTo(13.5f, 6f); P.lineTo(19.5f, 12f); P.lineTo(11.5f, 20f); P.close()
                 P.moveTo(8.5f, 11f); P.lineTo(14.5f, 17f); P.moveTo(12f, 20f); P.lineTo(20f, 20f)
+            }
+            Icon.SHAPE -> {
+                c.drawRoundRect(RectF(3.5f, 9.5f, 13.5f, 19.5f), 1.5f, 1.5f, p)
+                c.drawCircle(15.5f, 8.5f, 5f, p)
+            }
+            Icon.LASER -> {
+                P.moveTo(3.5f, 20.5f); P.lineTo(11f, 13f)
+                c.drawCircle(15f, 9f, 2.6f, p)
+                P.moveTo(15f, 3f); P.lineTo(15f, 4.3f); P.moveTo(21f, 9f); P.lineTo(19.7f, 9f); P.moveTo(19.3f, 4.7f); P.lineTo(18.4f, 5.6f)
+                P.moveTo(19.3f, 13.3f); P.lineTo(18.4f, 12.4f); P.moveTo(10.7f, 4.7f); P.lineTo(11.6f, 5.6f)
+            }
+            Icon.GUIDE -> {
+                P.moveTo(4f, 13f); P.cubicTo(5.5f, 7f, 7.5f, 7f, 8f, 13f); P.cubicTo(9f, 9f, 10.5f, 9f, 11f, 13f)
+                p.pathEffect = android.graphics.DashPathEffect(floatArrayOf(2.4f, 2f), 0f)
+                c.drawLine(3f, 16.5f, 21f, 16.5f, p)
+                p.pathEffect = null
             }
             Icon.LASSO -> {
                 p.pathEffect = android.graphics.DashPathEffect(floatArrayOf(2.6f, 2.2f), 0f)

@@ -54,7 +54,9 @@ class EditorDeviceTest {
 
     @Before fun setup() {
         Ui.setThemeSetting(ctx, "light")
-        ctx.getSharedPreferences("ui", 0).edit().putBoolean("penOnly", true).commit()
+        // shape snapping and the writing guide are tested on their own (they'd add marks to other tests' screenshots)
+        ctx.getSharedPreferences("ui", 0).edit().putBoolean("penOnly", true).putBoolean("snapShapes", false).putBoolean("writingGuide", false)
+            .putBoolean("areaEraser", false).commit()
     }
 
     // ------------------------------------------------------------------ helpers
@@ -791,6 +793,90 @@ class EditorDeviceTest {
         log("jitter: drawn wobble ${"%.2f".format(drawnDev)} px, stored ${"%.2f".format(storedDev)} px (screen px)")
         // the emulator delivers ~50 samples/s (the S Pen ~240), so the filter has fewer samples to average here
         assertTrue("jitter is reduced ($drawnDev -> $storedDev)", storedDev < drawnDev * 0.75)
+        s.close()
+    }
+
+    /** Shape tool, hold-to-shape, area eraser, laser pointer and the writing guide. */
+    @Test fun shapesLaserGuideAndAreaEraser() {
+        val s = launch(note(Pages.newPagedScene(PageOrientation.PORTRAIT, PageDirection.VERTICAL).toJson(), "shapes"))
+        val r = surfaceRect(s)
+        fun call(name: String, vararg args: Any) = s.onActivity { a ->
+            EditorActivity::class.java.declaredMethods.first { it.name == name && it.parameterCount == args.size }.apply { isAccessible = true }.invoke(a, *args)
+        }
+        fun set(name: String, v: Any?) = s.onActivity { a -> EditorActivity::class.java.getDeclaredField(name).apply { isAccessible = true }.set(a, v) }
+        fun count(type: String) = live(s, type)
+        fun at(fx: Float, fy: Float) = floatArrayOf(r.left + r.width() * fx, r.top + r.height() * fy, 0.6f)
+        fun drag(a: FloatArray, b: FloatArray, n: Int = 30) = gesture((0..n).map { i -> val t = i / n.toFloat(); floatArrayOf(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 0.6f) })
+
+        // 1) shape tool: ellipse and arrow by dragging
+        call("selectTool", EditorActivity.Tool.SHAPE)
+        set("shapeKind", ShapeKind.ELLIPSE); drag(at(0.3f, 0.15f), at(0.5f, 0.27f))
+        set("shapeKind", ShapeKind.ARROW); drag(at(0.55f, 0.2f), at(0.75f, 0.21f))
+        SystemClock.sleep(400)
+        shot("30-shape-tool")
+        assertEquals("ellipse drawn", 1, count("ellipse"))
+        val arrow = scene(s).elements.last { it.type == "arrow" }
+        assertEquals("arrow has a head", "\"arrow\"", arrow.json["endArrowhead"].toString())
+        assertEquals("nearly flat arrow snapped flat", 0.0, arrow.points.last()[1], 0.01)
+
+        // 2) hold at the end of a stroke: a rough rectangle becomes a rectangle, a straight stroke a line
+        call("selectTool", EditorActivity.Tool.PEN); set("snapShapes", true)
+        fun holdStroke(pts: List<FloatArray>) {
+            val down = gesture(pts, lift = false, stepMs = 6)
+            repeat(80) { SystemClock.sleep(10); inject(event(MotionEvent.ACTION_MOVE, down, pts.last()[0], pts.last()[1], 0.6f, MotionEvent.TOOL_TYPE_STYLUS)) }
+            inject(event(MotionEvent.ACTION_UP, down, pts.last()[0], pts.last()[1], 0.6f, MotionEvent.TOOL_TYPE_STYLUS))
+            SystemClock.sleep(400)
+        }
+        val rnd = java.util.Random(2)
+        val c = listOf(at(0.3f, 0.35f), at(0.6f, 0.35f), at(0.6f, 0.5f), at(0.3f, 0.5f), at(0.305f, 0.355f))
+        val rect = (0 until 4).flatMap { e -> (0 until 15).map { k -> val t = k / 15f; floatArrayOf(c[e][0] + (c[e + 1][0] - c[e][0]) * t + rnd.nextFloat() * 4 - 2, c[e][1] + (c[e + 1][1] - c[e][1]) * t + rnd.nextFloat() * 4 - 2, 0.6f) } } + listOf(c[4])
+        val fd0 = count("freedraw")
+        holdStroke(rect)
+        holdStroke((0..30).map { i -> floatArrayOf(r.left + r.width() * (0.3f + 0.3f * i / 30f), r.top + r.height() * 0.56f + (rnd.nextFloat() - 0.5f) * 3, 0.6f) })
+        shot("31-hold-to-shape")
+        assertEquals("held rough rectangle snapped", 1, count("rectangle"))
+        assertEquals("held straight stroke became a line", 1, count("line"))
+        assertEquals("no strokes left behind", fd0, count("freedraw"))
+        set("snapShapes", false)
+
+        // 3) area eraser cuts a stroke in two
+        val y = r.top + r.height() * 0.65f
+        gesture((0..40).map { i -> floatArrayOf(r.left + r.width() * (0.3f + 0.4f * i / 40f), y, 0.6f) })
+        SystemClock.sleep(300)
+        val fd1 = count("freedraw")
+        call("selectTool", EditorActivity.Tool.ERASER); set("areaEraser", true)
+        drag(floatArrayOf(r.exactCenterX(), y - 60, 0.5f), floatArrayOf(r.exactCenterX(), y + 60, 0.5f))
+        SystemClock.sleep(400)
+        shot("32-area-eraser")
+        assertEquals("the stroke was cut in two", fd1 + 1, count("freedraw"))
+
+        // 4) laser: a red trail while pointing, nothing stored, gone after a moment
+        call("selectTool", EditorActivity.Tool.LASER)
+        val n0 = scene(s).elements.size
+        val lp = (0..60).map { i -> floatArrayOf(r.left + r.width() * (0.3f + 0.4f * i / 60f), r.top + r.height() * 0.8f + 30f * sin(i / 6.0).toFloat(), 0.5f) }
+        val down = gesture(lp, lift = false, stepMs = 5)
+        fun red(b: Bitmap): Int { var n = 0; for (yy in (r.top + r.height() * 0.75f).toInt() until (r.top + r.height() * 0.85f).toInt() step 2) for (x in r.left until r.right step 2) { val p = b.getPixel(x, yy); if (Color.red(p) > 200 && Color.green(p) < 120 && Color.blue(p) < 120) n++ }; return n }
+        val during = red(auto.takeScreenshot())
+        inject(event(MotionEvent.ACTION_UP, down, lp.last()[0], lp.last()[1], 0.5f, MotionEvent.TOOL_TYPE_STYLUS))
+        SystemClock.sleep(2000)
+        val after = red(shot("33-laser-faded"))
+        log("laser: red px while pointing $during, after $after")
+        assertEquals("laser stores nothing", n0, scene(s).elements.size)
+        assertTrue("laser trail visible ($during)", during > 20)
+        assertTrue("laser trail fades ($after)", after < 5)
+
+        // 5) writing guide: a few "letters" in a row bring up the baseline
+        call("selectTool", EditorActivity.Tool.PEN); set("guideOn", true)
+        val by = r.top + r.height() * 0.9f
+        for (k in 0 until 7) {
+            val x0 = r.left + r.width() * 0.25f + k * 34f
+            gesture((0..14).map { i -> val t = i / 14.0; floatArrayOf(x0 + 12f * sin(t * PI).toFloat(), by - 28f * (1 - t).toFloat(), 0.6f) })
+            SystemClock.sleep(80)
+        }
+        SystemClock.sleep(300)
+        shot("34-writing-guide")
+        var g: Any? = null; s.onActivity { g = field<Any?>(it, "guide") }
+        assertNotNull("guide appears under handwriting", g)
         s.close()
     }
 

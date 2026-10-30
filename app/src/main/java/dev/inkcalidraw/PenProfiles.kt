@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Shader
 import kotlin.random.Random
+import kotlin.math.roundToInt
 
 /**
  * Pen profiles. All of them are stored as normal Excalidraw freedraw elements (so excalidraw.com shows
@@ -32,26 +33,62 @@ object PenProfiles {
 
     fun byId(id: String?): PenProfile = all.firstOrNull { it.id == id } ?: if (id == "highlighter") highlighter else all[0]
 
-    /** Repeating alpha texture for grainy brushes, in scene units (so grain stays put on the paper). */
-    fun grainShader(kind: String): Shader {
-        val size = 128
+    /** Grain coverage of each ring of a stroke, edge first (see GrainStroke.RINGS). */
+    private fun densities(kind: String) = if (kind == "chalk") floatArrayOf(0.34f, 0.6f, 0.84f) else floatArrayOf(0.42f, 0.7f, 0.93f)
+
+    private val noiseCache = HashMap<String, FloatArray>()
+    const val GRAIN_SIZE = 256
+
+    /**
+     * Tileable multi-octave value noise, rank-normalised to an even 0..1 spread (so a threshold t keeps exactly a
+     * fraction 1 - t of the texels). The rings of a stroke all threshold the same field, so the sparse edge grain is
+     * a subset of the denser grain inside it: the paper's tooth, not a different pattern.
+     */
+    @Synchronized fun noise(kind: String): FloatArray = noiseCache.getOrPut(kind) {
+        val n = GRAIN_SIZE
         val rnd = Random(if (kind == "chalk") 7 else 3)
-        val px = ByteArray(size * size)
-        if (kind == "chalk") {
-            // coarse, patchy coverage with gaps, like chalk on a board
-            val coarse = Array(size / 4) { FloatArray(size / 4) { rnd.nextFloat() } }
-            for (y in 0 until size) for (x in 0 until size) {
-                val c = coarse[y / 4][x / 4] * 0.6f + rnd.nextFloat() * 0.4f
-                px[y * size + x] = (if (c < 0.28f) 0 else (150 + c * 105).toInt().coerceAtMost(255)).toByte()
+        val octaves = if (kind == "chalk") listOf(2 to 0.30f, 4 to 0.28f, 16 to 0.24f, 64 to 0.18f) else listOf(1 to 0.40f, 2 to 0.27f, 8 to 0.18f, 32 to 0.15f)
+        val f = FloatArray(n * n)
+        for ((period, weight) in octaves) {
+            val g = n / period
+            val lattice = FloatArray(g * g) { rnd.nextFloat() }
+            for (y in 0 until n) for (x in 0 until n) {
+                val fx = x.toFloat() / period; val fy = y.toFloat() / period
+                val x0 = fx.toInt(); val y0 = fy.toInt()
+                var tx = fx - x0; var ty = fy - y0
+                tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty)
+                fun l(a: Int, b: Int) = lattice[(b % g) * g + (a % g)]
+                val v = (l(x0, y0) * (1 - tx) + l(x0 + 1, y0) * tx) * (1 - ty) + (l(x0, y0 + 1) * (1 - tx) + l(x0 + 1, y0 + 1) * tx) * ty
+                f[y * n + x] += v * weight
             }
-        } else {
-            // fine graphite grain, mostly covered
-            for (i in px.indices) { val v = rnd.nextFloat(); px[i] = (if (v < 0.12f) 70 else 190 + (v * 65).toInt()).coerceAtMost(255).toByte() }
         }
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
-        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
-        return BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply { anchorGrain(this, kind, 0f, 0f) }
+        val order = f.indices.sortedBy { f[it] }
+        val out = FloatArray(f.size)
+        order.forEachIndexed { rank, i -> out[i] = rank / (f.size - 1f) }
+        out
     }
+
+    /** Alpha of a texel with noise value v in a ring of grain coverage d. */
+    fun grainAlpha(v: Float, d: Float, kind: String): Int {
+        val t = 1f - d
+        val soft = if (kind == "chalk") 0.06f else 0.10f
+        val cover = ((v - (t - soft)) / (2 * soft)).coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
+        val tone = if (kind == "chalk") 0.72f + 0.28f * v else 0.58f + 0.42f * v // high spots of the paper take more
+        return (cover * tone * 255).roundToInt().coerceIn(0, 255)
+    }
+
+    /** Repeating alpha textures for a grainy brush, one per stroke ring (edge first), in scene units. */
+    fun grainShaders(kind: String): Array<Shader> {
+        val nz = noise(kind)
+        return densities(kind).map { d ->
+            val px = ByteArray(nz.size) { grainAlpha(nz[it], d, kind).toByte() }
+            val bmp = Bitmap.createBitmap(GRAIN_SIZE, GRAIN_SIZE, Bitmap.Config.ALPHA_8)
+            bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
+            BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply { anchorGrain(this, kind, 0f, 0f) } as Shader
+        }.toTypedArray()
+    }
+
+    fun anchorGrains(shaders: Array<Shader>, kind: String, originX: Float, originY: Float) = shaders.forEach { anchorGrain(it, kind, originX, originY) }
 
     private val grainMatrix = ThreadLocal.withInitial { android.graphics.Matrix() }
 
