@@ -178,6 +178,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
         colors = ColorHistory(this)
         penOnly = getSharedPreferences("ui", 0).getBoolean("penOnly", true)
         pressureLevel = PenPressure.level(this)
+        io.execute { PenProfiles.noise("pencil"); PenProfiles.noise("chalk") } // paper texture for pencil/chalk, before the first stroke
         getSharedPreferences("ui", 0).let { p ->
             snapShapes = p.getBoolean("snapShapes", true); areaEraser = p.getBoolean("areaEraser", false)
             guideOn = p.getBoolean("writingGuide", true); shapeKind = ShapeKind.of(p.getString("shape", null))

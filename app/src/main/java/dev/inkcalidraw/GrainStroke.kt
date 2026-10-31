@@ -52,7 +52,7 @@ object GrainStroke {
         if (n == 0) return Grains(arrayOfNulls(LEVELS), size)
         val noise = PenProfiles.noise(brush)
         val chalk = brush == "chalk"
-        val cover = if (chalk) 0.55 else 0.85
+        val cover = if (chalk) 1.7 else 1.5
         fun radius(i: Int) = PerfectFreehand.strokeRadius(o.size, o.thinning, points[i].pressure, o.easing)
         val area = (size * size).toDouble()
 
@@ -62,7 +62,7 @@ object GrainStroke {
             val gx = Math.floorMod(((x + originX) / k).toInt(), PenProfiles.GRAIN_SIZE)
             val gy = Math.floorMod(((y + originY) / k).toInt(), PenProfiles.GRAIN_SIZE)
             val paper = noise[gy * PenProfiles.GRAIN_SIZE + gx]
-            val floor = if (chalk) 0.32 + 0.25 * edge else 0.10 + 0.35 * edge  // the edge only catches the highest tooth
+            val floor = if (chalk) 0.18 + 0.4 * edge else 0.08 + 0.35 * edge  // the edge only catches the highest tooth
             if (paper < floor) return
             val tone = (if (chalk) 0.55 + 0.45 * paper else 0.45 + 0.55 * paper) * (0.75 + 0.25 * rnd.next()) * (1 - 0.45 * edge)
             val v = pressureFactor(brush, pressure) * tone
