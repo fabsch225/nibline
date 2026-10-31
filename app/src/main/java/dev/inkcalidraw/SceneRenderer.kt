@@ -47,7 +47,6 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
 
     /** Keyed by element identity: elements are immutable, an edit creates a new object. */
     private val pathCache = java.util.WeakHashMap<Element, Path>()
-    private val grains = HashMap<String, Array<android.graphics.Shader>>()
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
@@ -131,10 +130,10 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
 
     fun freedrawPath(el: Element): Path = pathCache.getOrPut(el) { outlinePath(el.freedrawOutline()) }
 
-    private val bandCache = java.util.WeakHashMap<Element, GrainStroke.Prepared>()
-    private fun grainStroke(el: Element, brush: String): GrainStroke.Prepared = bandCache.getOrPut(el) {
+    private val grainCache = java.util.WeakHashMap<Element, GrainStroke.Grains>()
+    private fun grains(el: Element, brush: String): GrainStroke.Grains = grainCache.getOrPut(el) {
         val o = PerfectFreehand.excalidrawOptions(el.strokeWidth, el.simulatePressure, last = false)
-        GrainStroke.prepare(PerfectFreehand.getStrokePoints(el.freedrawInput(), o), o, brush, freedrawPath(el))
+        GrainStroke.grains(PerfectFreehand.getStrokePoints(el.freedrawInput(), o), o, brush, el.strokeWidth, el.x, el.y)
     }
 
     private fun drawElement(c: Canvas, el: Element, input: Input) {
@@ -147,10 +146,8 @@ class SceneRenderer(private val dark: Boolean = false, private val syncImages: B
                 fill.color = col; fill.alpha = alpha
                 val brush = el.brush
                 if (GrainStroke.isGrainBrush(brush)) {
-                    // grain pinned to the paper (the canvas is translated to the element here), pressure as darkness
-                    val sh = grains.getOrPut(brush!!) { PenProfiles.grainShaders(brush) }
-                    PenProfiles.anchorGrains(sh, brush, el.x.toFloat(), el.y.toFloat())
-                    GrainStroke.draw(c, grainStroke(el, brush), fill, sh)
+                    // grains along the stroke (in the element's coordinates: the canvas is translated to it here)
+                    GrainStroke.draw(c, grains(el, brush!!), fill)
                 } else {
                     fill.shader = null
                     c.drawPath(freedrawPath(el), fill)

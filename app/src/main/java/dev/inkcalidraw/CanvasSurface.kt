@@ -62,15 +62,14 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
     // ---- render-thread state ----
     private val sceneRenderer = SceneRenderer(dark = ui.dark)
     private val wetPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val grains = HashMap<String, Array<android.graphics.Shader>>()
     private var wetStrokeId = -1
     private var prevTail: RectF? = null
     private val overlayStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ui.accent }
     private val overlayFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.argb(150, Color.red(ui.accent), Color.green(ui.accent), Color.blue(ui.accent)) }
-    private val laserGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.rgb(255, 40, 40) }
-    private val laserCore = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; color = Color.rgb(255, 70, 60) }
-    private val laserDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.rgb(255, 235, 230) }
+    private val laserGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = Color.WHITE
+        setShadowLayer(ui.dp(2f), 0f, 0f, Color.argb(70, 0, 0, 0)) }
+    private val laserCore = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = Color.rgb(240, 30, 30) }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = ui.dp(16) }
 
     init {
@@ -88,8 +87,9 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
             override fun surfaceDestroyed(h: SurfaceHolder) {}
         })
         renderer = CanvasFrontBufferedRenderer(this, object : CanvasFrontBufferedRenderer.Callback<Wet> {
-            override fun onDrawFrontBufferedLayer(canvas: Canvas, bufferWidth: Int, bufferHeight: Int, param: Wet) =
-                drawWet(canvas, param)
+            override fun onDrawFrontBufferedLayer(canvas: Canvas, bufferWidth: Int, bufferHeight: Int, param: Wet) {
+                val t0 = System.nanoTime(); drawWet(canvas, param); wetNanos += System.nanoTime() - t0; wetFrames++
+            }
 
             override fun onDrawMultiBufferedLayer(canvas: Canvas, bufferWidth: Int, bufferHeight: Int, params: Collection<Wet>) {
                 wetStrokeId = -1; prevTail = null
@@ -182,23 +182,38 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         // only the real samples go on the exact path: predicted ones keep perfect-freehand's damping, so a wrong
         // guess about where the pen goes next doesn't make the tip jitter
         val real = rel.subList(0, w.count.coerceIn(1, rel.size))
-        val exact = (PerfectFreehand.exactPathInput(real, opts, round = true) + rel.subList(real.size, rel.size))
-            .map { doubleArrayOf(it[0] + ox, it[1] + oy, it[2]) }
-        val strokePoints = PerfectFreehand.getStrokePoints(exact, opts)
-        val outline = PerfectFreehand.getStrokeOutlinePoints(strokePoints, opts)
-        val path = SceneRenderer.outlinePath(outline)
+        val relExact = PerfectFreehand.exactPathInput(real, opts, round = true) + rel.subList(real.size, rel.size)
+        val grain = w.grain?.takeIf { GrainStroke.isGrainBrush(it) }
+        // Pencil/chalk grains are computed in the stroke's own frame (like the committed element), the pen outline in scene coordinates.
+        val strokePoints: List<PerfectFreehand.StrokePoint>
+        var path: Path? = null
+        val bx: Double; val by: Double  // offset of strokePoints' frame in the scene
+        val full0 = RectF()
+        if (grain != null) {
+            strokePoints = PerfectFreehand.getStrokePoints(relExact, opts)
+            bx = ox; by = oy
+            var x0 = Double.MAX_VALUE; var y0 = Double.MAX_VALUE; var x1 = -Double.MAX_VALUE; var y1 = -Double.MAX_VALUE
+            for (p in strokePoints) { x0 = min(x0, p.point[0]); y0 = min(y0, p.point[1]); x1 = max(x1, p.point[0]); y1 = max(y1, p.point[1]) }
+            full0.set((x0 + ox - opts.size).toFloat(), (y0 + oy - opts.size).toFloat(), (x1 + ox + opts.size).toFloat(), (y1 + oy + opts.size).toFloat())
+        } else {
+            strokePoints = PerfectFreehand.getStrokePoints(relExact.map { doubleArrayOf(it[0] + ox, it[1] + oy, it[2]) }, opts)
+            bx = 0.0; by = 0.0
+            val outline = PerfectFreehand.getStrokeOutlinePoints(strokePoints, opts)
+            path = SceneRenderer.outlinePath(outline)
+            boundsOf(outline, full0)
+        }
 
-        // Only the tail of a perfect-freehand outline changes as points are added, so only clear and
-        // redraw around the pen tip; the rest of the front buffer already shows the identical stroke.
+        // Only the tail of a stroke changes as points are added, so only clear and redraw around the pen tip;
+        // the rest of the front buffer already shows the identical stroke.
         val pad = (opts.size * 1.2 + 4).toFloat()
         val newStroke = w.strokeId != wetStrokeId
         val full = newStroke || strokePoints.size < WetInk.FULL_REDRAW_BELOW
         val tail = RectF()
         if (full) {
-            boundsOf(outline, tail)
+            tail.set(full0)
             tail.inset(-pad, -pad)
         } else {
-            val t = WetInk.tailBox(strokePoints, w.samples, w.count, w.total, opts.size)
+            val t = WetInk.tailBox(strokePoints, w.samples, w.count, w.total, opts.size, bx, by)
             tail.set(t.minX.toFloat(), t.minY.toFloat(), t.maxX.toFloat(), t.maxY.toFloat())
         }
         val dirty = RectF(tail)
@@ -208,7 +223,7 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         wetStrokeId = w.strokeId
 
         // Clip in screen space, snapped to whole pixels, so the cleared area and the redrawn
-        // (anti-aliased) path cover exactly the same pixels: no seams at the dirty-rect edge.
+        // (anti-aliased) ink cover exactly the same pixels: no seams at the dirty-rect edge.
         val screen = RectF(dirty); w.matrix.mapRect(screen)
         val px = android.graphics.Rect(); screen.roundOut(px)
         canvas.save()
@@ -217,15 +232,13 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         canvas.concat(w.matrix)
         wetPaint.color = w.color
         wetPaint.alpha = w.alpha
-        val grain = w.grain
-        if (GrainStroke.isGrainBrush(grain)) {
-            // exactly what SceneRenderer draws for the committed stroke: grain pinned to the paper, pressure as darkness
-            val sh = grains.getOrPut(grain!!) { PenProfiles.grainShaders(grain) }
-            PenProfiles.anchorGrains(sh, grain, 0f, 0f) // the wet stroke is drawn in scene coordinates
-            GrainStroke.draw(canvas, GrainStroke.prepare(strokePoints, opts, grain, path), wetPaint, sh)
+        if (grain != null) {
+            // exactly what SceneRenderer draws for the committed stroke, but only the grains near the redrawn area
+            val only = Geometry.Box(dirty.left - ox - 2, dirty.top - oy - 2, dirty.right - ox + 2, dirty.bottom - oy + 2)
+            canvas.translate(ox.toFloat(), oy.toFloat())
+            GrainStroke.draw(canvas, GrainStroke.grains(strokePoints, opts, grain, w.strokeWidth, ox, oy, only), wetPaint)
         } else {
-            wetPaint.shader = null
-            canvas.drawPath(path, wetPaint)
+            canvas.drawPath(path!!, wetPaint)
         }
         canvas.restore()
     }
@@ -235,6 +248,10 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
         for (p in outline) { x0 = min(x0, p[0].toFloat()); y0 = min(y0, p[1].toFloat()); x1 = max(x1, p[0].toFloat()); y1 = max(y1, p[1].toFloat()) }
         out.set(x0, y0, x1, y1)
     }
+
+    /** Time spent drawing wet ink (render thread), read by the device tests. */
+    @Volatile var wetNanos = 0L
+    @Volatile var wetFrames = 0
 
     /** Number of committed-layer frames rendered (used by tests to wait for the first real frame). */
     @Volatile var framesDrawn = 0; private set
@@ -272,22 +289,24 @@ class CanvasSurface(context: Context, private val ui: Ui) : SurfaceView(context)
             canvas.drawLine(g[0], g[1], g[2], g[3], guidePaint)
         }
         f.laser?.let { pts ->
-            for (i in 1 until pts.size) {
-                val a = pts[i - 1]; val b = pts[i]
-                val k = minOf(a[2], b[2])
-                laserGlow.strokeWidth = ui.dp(11f) / s; laserGlow.alpha = (70 * k).toInt()
-                canvas.drawLine(a[0], a[1], b[0], b[1], laserGlow)
+            // one smooth red line with a white border (drawn as whole paths, so segments don't show as beads)
+            if (pts.isEmpty()) return@let
+            val alpha = pts.last()[2]
+            val p = Path()
+            p.moveTo(pts[0][0], pts[0][1])
+            if (pts.size == 1) p.lineTo(pts[0][0] + 0.01f, pts[0][1])
+            for (i in 1 until pts.size - 1) {
+                val mx = (pts[i][0] + pts[i + 1][0]) / 2; val my = (pts[i][1] + pts[i + 1][1]) / 2
+                p.quadTo(pts[i][0], pts[i][1], mx, my)
             }
-            for (i in 1 until pts.size) {
-                val a = pts[i - 1]; val b = pts[i]
-                val k = minOf(a[2], b[2])
-                laserCore.strokeWidth = ui.dp(3.5f) / s; laserCore.alpha = (255 * k).toInt()
-                canvas.drawLine(a[0], a[1], b[0], b[1], laserCore)
-            }
-            pts.lastOrNull()?.let { p ->
-                laserDot.alpha = (255 * p[2]).toInt()
-                canvas.drawCircle(p[0], p[1], ui.dp(4f) / s, laserDot)
-            }
+            if (pts.size > 1) p.lineTo(pts.last()[0], pts.last()[1])
+            val layer = alpha < 1f
+            if (layer) canvas.saveLayerAlpha(null, (255 * alpha).toInt().coerceIn(0, 255))
+            laserGlow.strokeWidth = ui.dp(7.5f) / s; laserGlow.alpha = 255
+            canvas.drawPath(p, laserGlow)
+            laserCore.strokeWidth = ui.dp(4f) / s; laserCore.alpha = 255
+            canvas.drawPath(p, laserCore)
+            if (layer) canvas.restore()
         }
         canvas.restore()
         f.eraser?.let { e ->

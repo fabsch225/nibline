@@ -178,7 +178,6 @@ private class StrokePreview(
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.color = ui.sceneColor(SceneRenderer.parseColor(color, Color.BLACK)); alpha = opacity * 255 / 100
     }
-    private val grainShaders = grain?.takeIf { GrainStroke.isGrainBrush(it) }?.let { PenProfiles.grainShaders(it) }
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = ui.subtext; textSize = ui.dp(12) }
     private val sel = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = ui.accentSoft }
 
@@ -194,7 +193,7 @@ private class StrokePreview(
         val o = PerfectFreehand.excalidrawOptions(shown, false, false)
         val sp = PerfectFreehand.getStrokePoints(pts, o)
         val path = SceneRenderer.outlinePath(PerfectFreehand.getStrokeOutlinePoints(sp, o))
-        if (grainShaders != null) GrainStroke.draw(c, GrainStroke.prepare(sp, o, grain!!, path), fill, grainShaders) // same as on the page
+        if (GrainStroke.isGrainBrush(grain)) GrainStroke.draw(c, GrainStroke.grains(sp, o, grain!!, shown, 0.0, 0.0), fill) // same as on the page
         else c.drawPath(path, fill)
         if (title != null) { label.color = ui.text; label.textSize = ui.dp(14); c.drawText(title, ui.dp(12), height / 2f + ui.dp(5), label) }
         else c.drawText(if (w % 1.0 == 0.0) w.toInt().toString() else w.toString(), width - ui.dp(46), height / 2f + ui.dp(4), label)

@@ -33,16 +33,12 @@ object PenProfiles {
 
     fun byId(id: String?): PenProfile = all.firstOrNull { it.id == id } ?: if (id == "highlighter") highlighter else all[0]
 
-    /** Grain coverage of each ring of a stroke, edge first (see GrainStroke.RINGS). */
-    private fun densities(kind: String) = if (kind == "chalk") floatArrayOf(0.34f, 0.6f, 0.84f) else floatArrayOf(0.42f, 0.7f, 0.93f)
-
     private val noiseCache = HashMap<String, FloatArray>()
     const val GRAIN_SIZE = 512 // big enough that the tile doesn't visibly repeat along a stroke
 
     /**
      * Tileable multi-octave value noise, rank-normalised to an even 0..1 spread (so a threshold t keeps exactly a
-     * fraction 1 - t of the texels). The rings of a stroke all threshold the same field, so the sparse edge grain is
-     * a subset of the denser grain inside it: the paper's tooth, not a different pattern.
+     * fraction 1 - t of the texels). Pencil and chalk grains sample it at their position on the page: the paper's tooth.
      */
     @Synchronized fun noise(kind: String): FloatArray = noiseCache.getOrPut(kind) {
         val n = GRAIN_SIZE
@@ -70,39 +66,4 @@ object PenProfiles {
         out
     }
 
-    /** Alpha of a texel with noise value v in a ring of grain coverage d. */
-    fun grainAlpha(v: Float, d: Float, kind: String): Int {
-        val t = 1f - d
-        val soft = if (kind == "chalk") 0.06f else 0.10f
-        val cover = ((v - (t - soft)) / (2 * soft)).coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
-        val tone = if (kind == "chalk") 0.72f + 0.28f * v else 0.58f + 0.42f * v // high spots of the paper take more
-        return (cover * tone * 255).roundToInt().coerceIn(0, 255)
-    }
-
-    /** Repeating alpha textures for a grainy brush, one per stroke ring (edge first), in scene units. */
-    fun grainShaders(kind: String): Array<Shader> {
-        val nz = noise(kind)
-        return densities(kind).map { d ->
-            val px = ByteArray(nz.size) { grainAlpha(nz[it], d, kind).toByte() }
-            val bmp = Bitmap.createBitmap(GRAIN_SIZE, GRAIN_SIZE, Bitmap.Config.ALPHA_8)
-            bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(px))
-            BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT).apply { anchorGrain(this, kind, 0f, 0f) } as Shader
-        }.toTypedArray()
-    }
-
-    fun anchorGrains(shaders: Array<Shader>, kind: String, originX: Float, originY: Float) = shaders.forEach { anchorGrain(it, kind, originX, originY) }
-
-    private val grainMatrix = ThreadLocal.withInitial { android.graphics.Matrix() }
-
-    /**
-     * Pins the grain to the paper: texel positions are fixed in scene coordinates, whatever the canvas is translated to.
-     * [originX]/[originY] = scene position of the canvas origin (an element's x/y when drawing it in local coordinates).
-     */
-    fun anchorGrain(shader: Shader, kind: String, originX: Float, originY: Float) {
-        val k = if (kind == "chalk") 0.5f else 0.25f
-        val m = grainMatrix.get()!!
-        m.setScale(k, k)
-        m.postTranslate(-originX, -originY)
-        shader.setLocalMatrix(m)
-    }
 }

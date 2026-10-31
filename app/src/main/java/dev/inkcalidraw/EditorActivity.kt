@@ -124,6 +124,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
     // ---- laser pointer ----
     private val laser = ArrayList<FloatArray>()  // world x, y, time (uptime ms, as float offset)
     private val laserT0 = SystemClock.uptimeMillis()
+    private var laserUpAt = 0f
     private var laserFrame: android.view.Choreographer.FrameCallback? = null
     private val fingerHold = Runnable {
         // not for a palm resting while the pen is near
@@ -541,7 +542,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
                 if (selected.isNotEmpty()) setSelection(emptySet())
                 shapeStart = w; shapePreview = null; snappedLine = false
             }
-            G.LASER -> { laserAdd(w); startLaser() }
+            G.LASER -> { laser.clear(); laserAdd(w); startLaser() }
             G.INK -> {
                 if (meta.paged && Pages.pageAt(Pages.pages(scene), w[0].toDouble(), w[1].toDouble()) == null) { g = G.NONE; return }
                 if (selected.isNotEmpty()) setSelection(emptySet())
@@ -662,7 +663,7 @@ class EditorActivity : ComponentActivity(), Live.Source {
             G.DRAG -> commitDrag(canceled)
             G.RESIZE -> { resizeIndex = -1; markDirty() }
             G.SHAPE -> commitShape(canceled)
-            G.LASER -> {}
+            G.LASER -> laserUpAt = laserNow()
             else -> {}
         }
         g = G.NONE; drawPointer = -1; eraserCursor = null; lasso.clear()
@@ -802,22 +803,19 @@ class EditorActivity : ComponentActivity(), Live.Source {
         laser.add(floatArrayOf(w[0], w[1], laserNow()))
     }
 
-    private fun laserAlpha(age: Float) = (1f - (age - LASER_HOLD_MS) / LASER_FADE_MS).coerceIn(0f, 1f)
+    /** Laser trail while pointing: the last [LASER_TRAIL_MS]. After lifting the pen it stays, then fades out as a whole. */
+    private fun laserAlpha(now: Float) = if (g == G.LASER) 1f else (1f - (now - laserUpAt - LASER_HOLD_MS) / LASER_FADE_MS).coerceIn(0f, 1f)
 
     private fun laserTrail(): List<FloatArray>? {
         if (laser.isEmpty()) return null
-        val now = laserNow()
-        return laser.mapIndexed { i, p ->
-            val a = if (g == G.LASER && i == laser.lastIndex) 1f else laserAlpha(now - p[2])
-            floatArrayOf(p[0], p[1], a)
-        }
+        val a = laserAlpha(laserNow())
+        return laser.map { floatArrayOf(it[0], it[1], a) }
     }
 
-    /** Laser trail for live viewers: a red stroke along its still-visible part. */
+    /** Laser trail for live viewers: a red stroke along it. */
     private fun laserElement(): kotlinx.serialization.json.JsonObject? {
-        val now = laserNow()
-        val pts = laser.filter { laserAlpha(now - it[2]) > 0.35f }.map { floatArrayOf(it[0], it[1], 0.5f) }
-        if (pts.isEmpty()) return null
+        if (laser.isEmpty() || laserAlpha(laserNow()) < 0.3f) return null
+        val pts = laser.map { floatArrayOf(it[0], it[1], 0.5f) }
         return ExcalidrawScene.newFreedraw(if (pts.size == 1) listOf(pts[0], pts[0]) else pts, "#ff3b30", 1.0, FractionalIndex.after(scene.lastIndex()), 90, null, null).json
     }
 
@@ -827,8 +825,8 @@ class EditorActivity : ComponentActivity(), Live.Source {
         laserFrame = object : android.view.Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 val now = laserNow()
-                while (laser.size > 1 && laserAlpha(now - laser[0][2]) <= 0f) laser.removeAt(0)
-                if (g != G.LASER && laser.isNotEmpty() && laserAlpha(now - laser.last()[2]) <= 0f) laser.clear()
+                if (g == G.LASER) while (laser.size > 1 && now - laser[0][2] > LASER_TRAIL_MS) laser.removeAt(0)
+                else if (laserAlpha(now) <= 0f) laser.clear()
                 if (laser.isEmpty()) { laserFrame = null; Live.wetEnd(); redraw(); return }
                 laserElement()?.let { e -> Live.wet { e } } ?: Live.wetEnd()
                 redraw()
@@ -1585,17 +1583,26 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun updateColorViews() {
         if (!::colorDot.isInitialized) return
         val pen = activePen()
-        colorDot.background = android.graphics.drawable.GradientDrawable().apply {
+        // the palette button: current colour inside a rainbow ring (opens all colours)
+        val ring = android.graphics.drawable.GradientDrawable().apply {
             shape = android.graphics.drawable.GradientDrawable.OVAL
-            setColor(ui.sceneColor(SceneRenderer.parseColor(pen.color, Color.BLACK)))
-            setStroke(ui.dpi(2), ui.accent)
+            gradientType = android.graphics.drawable.GradientDrawable.SWEEP_GRADIENT
+            colors = intArrayOf(0xffe03131.toInt(), 0xfff59f00.toInt(), 0xff2f9e44.toInt(), 0xff1971c2.toInt(), 0xff9c36b5.toInt(), 0xffe03131.toInt())
         }
+        val dot = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(ui.sceneColor(SceneRenderer.parseColor(pen.color, Color.BLACK))); setStroke(ui.dpi(2), ui.bar)
+        }
+        colorDot.background = android.graphics.drawable.LayerDrawable(arrayOf(ring, dot)).apply { setLayerInset(1, ui.dpi(3), ui.dpi(3), ui.dpi(3), ui.dpi(3)) }
         recentRow.removeAllViews()
-        colors.list().filter { !it.equals(pen.color, true) }.take(3).forEach { c ->
+        // fixed slots: the most recent colours in the order they were first used; picking one doesn't move anything
+        colors.list().take(4).forEach { c ->
+            val current = c.equals(pen.color, true)
             recentRow.addView(View(this).apply {
                 background = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(ui.sceneColor(SceneRenderer.parseColor(c, Color.BLACK))); setStroke(ui.dpi(1), ui.divider)
+                    setColor(ui.sceneColor(SceneRenderer.parseColor(c, Color.BLACK)))
+                    if (current) setStroke(ui.dpi(2), ui.accent) else setStroke(ui.dpi(1), ui.divider)
                 }
                 contentDescription = c
                 setOnClickListener { useColor(c) }
@@ -1803,6 +1810,6 @@ class EditorActivity : ComponentActivity(), Live.Source {
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
     companion object {
-        const val HOLD_TO_SHAPE_MS = 450L; const val LASER_HOLD_MS = 450f; const val LASER_FADE_MS = 550f
+        const val HOLD_TO_SHAPE_MS = 450L; const val LASER_TRAIL_MS = 1600f; const val LASER_HOLD_MS = 1200f; const val LASER_FADE_MS = 500f
         const val EXTRA_NAME = "name"; const val EXTRA_FOLDER = "folder"; const val EXTRA_FOLDER_PATH = "folderPath" }
 }

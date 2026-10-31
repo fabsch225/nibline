@@ -632,7 +632,10 @@ class EditorDeviceTest {
             // 1) wet == dry
             val pts = wave(r, r.top + r.height() * 0.3f)
             val box = Rect(pts.minOf { it[0] }.toInt() - 30, pts.minOf { it[1] }.toInt() - 40, pts.maxOf { it[0] }.toInt() + 30, pts.maxOf { it[1] }.toInt() + 40)
+            var w0 = 0L; var f0 = 0; s.onActivity { val sf = field<CanvasSurface>(it, "surface"); w0 = sf.wetNanos; f0 = sf.wetFrames }
             val down = gesture(pts, lift = false)
+            var w1 = 0L; var f1 = 0; s.onActivity { val sf = field<CanvasSurface>(it, "surface"); w1 = sf.wetNanos; f1 = sf.wetFrames }
+            log("grain $brush: wet ink ${"%.2f".format((w1 - w0) / 1e6 / maxOf(1, f1 - f0))} ms per frame over ${f1 - f0} frames")
             val settle = { repeat(6) { SystemClock.sleep(8); inject(event(MotionEvent.ACTION_MOVE, down, pts.last()[0], pts.last()[1], pts.last()[2], MotionEvent.TOOL_TYPE_STYLUS)) } }
             settle()
             val wet = stable("25-$brush-wet", box, settle)
@@ -771,6 +774,12 @@ class EditorDeviceTest {
         assertEquals("lasso -> colour -> pen again", EditorActivity.Tool.PEN, tool())
         var color = ""; s.onActivity { a -> color = EditorActivity::class.java.getDeclaredMethod("activePen").apply { isAccessible = true }.invoke(a).let { (it as PenConfig).color } }
         assertEquals("#e03131", color)
+        // the recent colours stay where they are when one of them is picked
+        fun slots(): List<String> { val out = ArrayList<String>(); s.onActivity { a -> val row = field<android.widget.LinearLayout>(a, "recentRow"); for (i in 0 until row.childCount) out += row.getChildAt(i).contentDescription.toString() }; return out }
+        call("useColor", "#2f9e44")
+        val before = slots()
+        call("useColor", before[2])
+        assertEquals("picking a recent colour doesn't reorder them", before, slots())
         s.close()
     }
 
@@ -858,9 +867,12 @@ class EditorDeviceTest {
         fun red(b: Bitmap): Int { var n = 0; for (yy in (r.top + r.height() * 0.75f).toInt() until (r.top + r.height() * 0.85f).toInt() step 2) for (x in (r.left + r.width() * 0.35f).toInt() until (r.left + r.width() * 0.65f).toInt() step 2) { val p = b.getPixel(x, yy); if (Color.red(p) > 200 && Color.green(p) < 120 && Color.blue(p) < 120) n++ }; return n }
         val during = red(auto.takeScreenshot())
         inject(event(MotionEvent.ACTION_UP, down, lp.last()[0], lp.last()[1], 0.5f, MotionEvent.TOOL_TYPE_STYLUS))
-        SystemClock.sleep(2000)
+        SystemClock.sleep(600)
+        val held = red(auto.takeScreenshot())
+        SystemClock.sleep(1800)
         val after = red(shot("33-laser-faded"))
-        log("laser: red px while pointing $during, after $after")
+        log("laser: red px while pointing $during, just after lifting $held, later $after")
+        assertTrue("laser trail stays a moment after lifting ($held)", held > 20)
         assertEquals("laser stores nothing", n0, scene(s).elements.size)
         assertTrue("laser trail visible ($during)", during > 20)
         assertTrue("laser trail fades ($after)", after < 5)
